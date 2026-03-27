@@ -5,9 +5,12 @@ const axios = require('axios');
 const CryptoJS = require('crypto-js');
 const mongoose = require('mongoose');
 const md5 = require('md5');
+const path = require('path');
 require('dotenv').config();
+const cookieParser = require('cookie-parser');
 
 const app = express();
+app.use(cookieParser());
 
 // Настройка CORS: разрешить только вашему фронтенду
 const allowedOrigins = [
@@ -54,15 +57,63 @@ const decrypt = (encrypted) => {
   return bytes.toString(CryptoJS.enc.Utf8);
 };
 
+// Middleware для защиты доступа (только для ПОЛЬЗОВАТЕЛЯ)
+const authMiddleware = (req, res, next) => {
+  const token = req.cookies.app_token;
+  const publicPaths = ['/api/login', '/login', '/favicon.ico'];
+  
+  // Если это публичный путь, разрешаем
+  if (publicPaths.some(p => req.path.startsWith(p))) {
+    return next();
+  }
+
+  // Проверка сессии (пароля)
+  if (token === process.env.APP_PASSWORD || token === 'authorized_session') {
+    return next();
+  }
+
+  // Если запрос к API — возвращаем 401
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // Если запрос к странице — редирект на логин (будет обработан фронтендом или статикой)
+  next(); 
+};
+
+app.use(authMiddleware);
+
 // ── API Эндпоинты ────────────────────────────────────────────────────────────
 
-// Тестовый эндпоинт
-app.get('/', (req, res) => {
-  res.send('<h1>🚀 Proxy Server is Running!</h1><p>Use /api/health to check status.</p>');
+// Эндпоинт для проверки пароля
+app.post('/api/login', (req, res) => {
+  const { password } = req.body;
+  const securePassword = process.env.APP_PASSWORD || 'admin';
+
+  if (password === securePassword) {
+    // Устанавливаем куку на 30 дней
+    res.cookie('app_token', securePassword, { 
+      maxAge: 30 * 24 * 60 * 60 * 1000, 
+      httpOnly: false, // Фронтенд должен иметь доступ для проверки в useStore
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax'
+    });
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: 'Wrong password' });
 });
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Раздача статических файлов фронтенда
+const distPath = path.join(__dirname, '../dist');
+app.use(express.static(distPath));
+
+// Все остальные GET-запросы отправляют index.html (для React Router)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 // Сохранить аккаунт (шифрует токен перед сохранением)

@@ -4,6 +4,7 @@ import { useScheduler } from './hooks/useScheduler';
 import { useReposter } from './hooks/useReposter';
 import { useNotifications } from './hooks/useNotifications';
 import Sidebar from './components/Sidebar';
+import Login from './components/Login';
 import ComposerPage from './components/ComposerPage';
 import SchedulerPage from './components/SchedulerPage';
 import AccountsPage from './components/AccountsPage';
@@ -15,10 +16,19 @@ import ReposterPage from './components/ReposterPage';
 import AnalyticsPage from './components/AnalyticsPage';
 
 export default function App() {
-  const { activeTab } = useStore();
+  const { activeTab, isAuthorized } = useStore();
   useScheduler();      // ⏰ Автоматический планировщик публикаций
   useReposter();       // 🔄 Автоматический репостер
   useNotifications();  // 🔔 Push-уведомления + авто-удаление
+
+  if (!isAuthorized) {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <Login />
+      </>
+    );
+  }
 
   const renderPage = () => {
     switch (activeTab) {

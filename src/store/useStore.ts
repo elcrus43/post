@@ -18,6 +18,7 @@ interface AppStore {
   // Backend Proxy Configuration
   backendUrl: string | null;
   useBackend: boolean;
+  isAuthorized: boolean;
 
   addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => void;
   updateAccount: (id: string, updates: Partial<Account>) => void;
@@ -49,6 +50,7 @@ interface AppStore {
   incrementConversions: (id: string, count?: number) => void;
   clearAnalytics: () => void;
 
+  setAuthorized: (status: boolean) => void;
   setActiveTab: (tab: string) => void;
 }
 
@@ -64,6 +66,7 @@ export const useStore = create<AppStore>()(
       analyticsEntries: [],
       backendUrl: 'https://post-production-01fa.up.railway.app',
       useBackend: true,
+      isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
 
       addAccount: (account) => {
         const newAccount: Account = {
@@ -227,9 +230,11 @@ export const useStore = create<AppStore>()(
 
       clearAnalytics: () => set({ analyticsEntries: [] }),
 
-      setBackendConfig: (url, enabled) => set({ backendUrl: url, useBackend: enabled }),
+      setBackendConfig: (url: string | null, enabled: boolean) => set({ backendUrl: url, useBackend: enabled }),
 
-      setActiveTab: (tab) => set({ activeTab: tab }),
+      setAuthorized: (status: boolean) => set({ isAuthorized: status }),
+
+      setActiveTab: (tab: string) => set({ activeTab: tab }),
     }),
     { name: 'autopost-storage' }
   )
