@@ -12,6 +12,8 @@ const cookieParser = require('cookie-parser');
 const app = express();
 app.use(cookieParser());
 
+const APP_PASSWORD = process.env.APP_PASSWORD || 'admin';
+
 // Настройка CORS: разрешить только вашему фронтенду
 const allowedOrigins = [
   process.env.FRONTEND_URL, 
@@ -68,7 +70,7 @@ const authMiddleware = (req, res, next) => {
   }
 
   // Проверка сессии (пароля)
-  if (token === process.env.APP_PASSWORD || token === 'authorized_session') {
+  if (token === APP_PASSWORD || token === 'authorized_session') {
     return next();
   }
 
@@ -88,11 +90,10 @@ app.use(authMiddleware);
 // Эндпоинт для проверки пароля
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
-  const securePassword = process.env.APP_PASSWORD || 'admin';
 
-  if (password === securePassword) {
+  if (password === APP_PASSWORD) {
     // Устанавливаем куку на 30 дней
-    res.cookie('app_token', securePassword, { 
+    res.cookie('app_token', APP_PASSWORD, { 
       maxAge: 30 * 24 * 60 * 60 * 1000, 
       httpOnly: false, // Фронтенд должен иметь доступ для проверки в useStore
       secure: process.env.NODE_ENV === 'production',
