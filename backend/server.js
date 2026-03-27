@@ -85,12 +85,8 @@ app.use(authMiddleware);
 // Эндпоинт для проверки пароля
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
-  
-  console.log(`[Login Attempt] Received password length: ${password?.length || 0}`);
-  console.log(`[Login Attempt] Expected password length: ${APP_PASSWORD.length}`);
 
   if (password === APP_PASSWORD) {
-    console.log('[Login Attempt] Success');
     // Устанавливаем куку на 30 дней
     res.cookie('app_token', APP_PASSWORD, { 
       maxAge: 30 * 24 * 60 * 60 * 1000, 
@@ -101,7 +97,6 @@ app.post('/api/login', (req, res) => {
     return res.json({ success: true });
   }
   
-  console.log('[Login Attempt] Failed: Password mismatch');
   res.status(401).json({ error: 'Wrong password' });
 });
 
