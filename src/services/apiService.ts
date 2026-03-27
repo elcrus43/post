@@ -285,8 +285,17 @@ export async function publishToAccount(account: Account, post: Post): Promise<Po
           
           // Добавим токены в запрос для прокси (если сервер позволяет)
           // Но лучше доработать server.js чтобы он принимал токены если нет accountId
-          token: account.platform === 'vk' ? account.vkToken : account.tgBotToken,
-          ownerId: account.platform === 'vk' ? account.vkOwnerId : account.tgChatId,
+          token: account.platform === 'vk' ? account.vkToken : 
+                 account.platform === 'ok' ? account.okToken : 
+                 account.tgBotToken,
+          ownerId: account.platform === 'vk' ? account.vkOwnerId : 
+                   account.platform === 'ok' ? account.okGroupId : 
+                   account.tgChatId,
+          
+          // Для OK дополнительные поля
+          appKey: account.okAppKey,
+          secretKey: account.okAppSecretKey,
+          groupId: account.okGroupId,
         }),
       });
       const data = await res.json();

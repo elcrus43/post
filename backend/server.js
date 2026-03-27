@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const CryptoJS = require('crypto-js');
 const mongoose = require('mongoose');
+const md5 = require('md5');
 require('dotenv').config();
 
 const app = express();
@@ -147,6 +148,87 @@ app.post('/api/publish/telegram', async (req, res) => {
       parse_mode
     });
 
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Одноклассники ────────────────────────────────────────────────────────────
+
+function okSign(params, secretKey) {
+  const sorted = Object.keys(params)
+    .sort()
+    .map((k) => `${k}=${params[k]}`)
+    .join('');
+  return md5(sorted + secretKey).toUpperCase();
+}
+
+app.post('/api/publish/ok', async (req, res) => {
+  try {
+    const { 
+      accountId, 
+      token: directToken, 
+      appKey: directAppKey, 
+      secretKey: directSecretKey,
+      groupId: directGroupId,
+      message, 
+      attachments 
+    } = req.body;
+
+    let token = directToken;
+    let appKey = directAppKey;
+    let secretKey = directSecretKey;
+    let groupId = directGroupId;
+
+    if (accountId) {
+      const account = await Account.findById(accountId);
+      if (account) {
+        token = decrypt(account.encryptedToken);
+        // В нашей текущей схеме нет appKey/secretKey для OK, 
+        // предположим они передаются или тоже хранятся (нужно расширить схему если планируем хранить)
+      }
+    }
+
+    if (!token || !appKey || !secretKey) {
+      return res.status(400).json({ error: 'Missing OK credentials (token, appKey, or secretKey)' });
+    }
+
+    const sessionSecretKey = md5(token + secretKey).toLowerCase();
+    
+    // Подготовим аттачмент как в apiService.ts
+    const attachmentObj = {
+      media: [{ type: 'text', text: message }]
+    };
+    // Если есть картинки, добавить их (упрощенно)
+    if (attachments) {
+      attachments.split(',').forEach(url => {
+        attachmentObj.media.push({ type: 'photo', url });
+      });
+    }
+
+    const params = {
+      application_key: appKey,
+      attachment: JSON.stringify(attachmentObj),
+      format: 'json',
+      method: 'mediatopic.post',
+      type: 'GROUP_THEME',
+      ...(groupId ? { gid: groupId } : {}),
+    };
+
+    const sig = okSign(params, sessionSecretKey);
+
+    const response = await axios.get('https://api.ok.ru/fb.do', {
+      params: {
+        ...params,
+        sig,
+        access_token: token,
+      }
+    });
+
+    if (response.data.error_code) {
+      return res.status(400).json(response.data);
+    }
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.message });
