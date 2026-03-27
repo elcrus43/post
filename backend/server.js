@@ -57,6 +57,10 @@ const decrypt = (encrypted) => {
 // ── API Эндпоинты ────────────────────────────────────────────────────────────
 
 // Тестовый эндпоинт
+app.get('/', (req, res) => {
+  res.send('<h1>🚀 Proxy Server is Running!</h1><p>Use /api/health to check status.</p>');
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });

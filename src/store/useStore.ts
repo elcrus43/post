@@ -62,8 +62,8 @@ export const useStore = create<AppStore>()(
       repostHistory: [],
       utmPresets: [],
       analyticsEntries: [],
-      backendUrl: null,
-      useBackend: false,
+      backendUrl: 'https://post-production-01fa.up.railway.app',
+      useBackend: true,
 
       addAccount: (account) => {
         const newAccount: Account = {
