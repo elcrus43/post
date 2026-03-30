@@ -52,11 +52,13 @@ interface AppStore {
 
   setAuthorized: (status: boolean) => void;
   setActiveTab: (tab: string) => void;
+  syncAccounts: () => Promise<void>;
+  setBackendConfig: (url: string | null, enabled: boolean) => void;
 }
 
 export const useStore = create<AppStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       accounts: [],
       posts: [],
       activeTab: 'composer',
@@ -68,7 +70,50 @@ export const useStore = create<AppStore>()(
       useBackend: true,
       isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
 
-      addAccount: (account) => {
+      syncAccounts: async () => {
+        const { useBackend, backendUrl } = get();
+        if (!useBackend || !backendUrl) return;
+
+        try {
+          const res = await fetch(`${backendUrl}/api/accounts`);
+          if (res.ok) {
+            const data = await res.json();
+            set({ accounts: data });
+          }
+        } catch (e) {
+          console.error('Failed to sync accounts:', e);
+        }
+      },
+
+      addAccount: async (account) => {
+        const { useBackend, backendUrl } = get();
+
+        if (useBackend && backendUrl) {
+          try {
+            const res = await fetch(`${backendUrl}/api/accounts`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                platform: account.platform,
+                name: account.name,
+                ownerId: account.vkOwnerId || account.tgChatId || account.okGroupId,
+                token: account.vkToken || account.tgBotToken || account.okToken,
+                okAppKey: account.okAppKey,
+                okAppSecretKey: account.okAppSecretKey,
+                okGroupId: account.okGroupId,
+              }),
+            });
+            if (res.ok) {
+              const newAcc = await res.json();
+              set((s) => ({ accounts: [...s.accounts, newAcc] }));
+              return;
+            }
+          } catch (e) {
+            console.error('Backend save failed:', e);
+          }
+        }
+
+        // Fallback to local if backend fails or disabled
         const newAccount: Account = {
           ...account,
           id: crypto.randomUUID(),
@@ -83,11 +128,27 @@ export const useStore = create<AppStore>()(
         }));
       },
 
-      removeAccount: (id) => {
+      removeAccount: async (id) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl) {
+          try {
+            await fetch(`${backendUrl}/api/accounts/${id}`, { method: 'DELETE' });
+          } catch (e) {
+            console.error('Backend delete failed:', e);
+          }
+        }
         set((s) => ({ accounts: s.accounts.filter((a) => a.id !== id) }));
       },
 
-      toggleAccount: (id) => {
+      toggleAccount: async (id) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl) {
+          try {
+            await fetch(`${backendUrl}/api/accounts/${id}/toggle`, { method: 'PATCH' });
+          } catch (e) {
+            console.error('Backend toggle failed:', e);
+          }
+        }
         set((s) => ({
           accounts: s.accounts.map((a) =>
             a.id === id ? { ...a, isActive: !a.isActive } : a
@@ -230,7 +291,12 @@ export const useStore = create<AppStore>()(
 
       clearAnalytics: () => set({ analyticsEntries: [] }),
 
-      setBackendConfig: (url: string | null, enabled: boolean) => set({ backendUrl: url, useBackend: enabled }),
+      setBackendConfig: (url: string | null, enabled: boolean) => {
+        set({ backendUrl: url, useBackend: enabled });
+        if (enabled) {
+          get().syncAccounts();
+        }
+      },
 
       setAuthorized: (status: boolean) => set({ isAuthorized: status }),
 

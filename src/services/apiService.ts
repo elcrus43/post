@@ -131,7 +131,7 @@ async function postToVK(account: Account, post: Post): Promise<PostResult> {
       v: '5.199',
     });
 
-    const url = `https://api.vk.com/method/wall.post?${params}`;
+    const url = `https://api.vk.ru/method/wall.post?${params}`;
 
     // Пробуем сначала напрямую, при CORS-ошибке — через прокси
     let data: Record<string, unknown>;
@@ -166,7 +166,7 @@ async function postToVK(account: Account, post: Post): Promise<PostResult> {
 export async function testVKConnection(token: string): Promise<{ ok: boolean; name?: string; error?: string }> {
   try {
     const params = new URLSearchParams({ access_token: token, v: '5.199' });
-    const url = `https://api.vk.com/method/users.get?${params}`;
+    const url = `https://api.vk.ru/method/users.get?${params}`;
     let data: Record<string, unknown>;
     try {
       const res = await fetch(url, { mode: 'cors' });
@@ -192,7 +192,7 @@ function okSign(params: Record<string, string>, secretKey: string): string {
     .sort()
     .map((k) => `${k}=${params[k]}`)
     .join('');
-  return md5(sorted + secretKey).toUpperCase();
+  return md5(sorted + secretKey).toLowerCase();
 }
 
 async function postToOK(account: Account, post: Post): Promise<PostResult> {
@@ -255,13 +255,52 @@ async function postToOK(account: Account, post: Post): Promise<PostResult> {
   }
 }
 
+// ─── Проверка OK токена ───────────────────────────────────────────────────────
+export async function testOKConnection(token: string, appKey: string, appSecret: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  try {
+    const sessionSecretKey = md5(token + appSecret).toLowerCase();
+    const params: Record<string, string> = {
+      application_key: appKey,
+      format: 'json',
+      method: 'users.getCurrentUser',
+    };
+    const sig = okSign(params, sessionSecretKey);
+    const urlParams = new URLSearchParams({ ...params, sig, access_token: token });
+    const url = `https://api.ok.ru/fb.do?${urlParams}`;
+
+    let data: any;
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      data = await res.json();
+    } catch {
+      const res = await fetch(proxied(url));
+      data = await res.json();
+    }
+
+    if (data.error_code) {
+      return { ok: false, error: `[${data.error_code}] ${data.error_msg}` };
+    }
+    return { ok: true, name: `${data.first_name || ''} ${data.last_name || ''}`.trim() };
+  } catch (e) {
+    return { ok: false, error: 'Ошибка подключения к OK: ' + (e instanceof Error ? e.message : String(e)) };
+  }
+}
+
 // ─── Главная функция публикации ───────────────────────────────────────────────
 export async function publishToAccount(account: Account, post: Post): Promise<PostResult> {
   const { useBackend, backendUrl } = useStore.getState();
 
   if (useBackend && backendUrl) {
     try {
-      const endpoint = account.platform === 'telegram' ? '/api/publish/telegram' : `/api/publish/${account.platform}`;
+      let endpoint: string;
+      if (account.platform === 'vk' && post.isVkStory) {
+        endpoint = '/api/publish/vk/story';
+      } else if (account.platform === 'telegram') {
+        endpoint = '/api/publish/telegram';
+      } else {
+        endpoint = `/api/publish/${account.platform}`;
+      }
+
       const res = await fetch(`${backendUrl}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

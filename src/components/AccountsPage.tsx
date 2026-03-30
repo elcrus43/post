@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore';
 import { Account, Platform, AccountType } from '../types';
 import PlatformIcon from './PlatformIcon';
 import { cn } from '../utils/cn';
-import { testTelegramConnection, testVKConnection } from '../services/apiService';
+import { testTelegramConnection, testVKConnection, testOKConnection } from '../services/apiService';
 import toast from 'react-hot-toast';
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -100,7 +100,10 @@ export default function AccountsPage() {
         if (r.ok) toast.success(`✅ VK подключён: ${r.name}`);
         else toast.error(`❌ Ошибка: ${r.error}`);
       } else {
-        toast('⚠️ Тест для OK пока недоступен — сохраните и проверьте публикацией', { icon: 'ℹ️' });
+        if (!form.okToken || !form.okAppKey || !form.okAppSecretKey) { toast.error('Заполните все поля OK'); return; }
+        const r = await testOKConnection(form.okToken, form.okAppKey, form.okAppSecretKey);
+        if (r.ok) toast.success(`✅ Одноклассники: ${r.name}`);
+        else toast.error(`❌ Ошибка: ${r.error}`);
       }
     } finally {
       setTestingForm(false);
@@ -118,6 +121,10 @@ export default function AccountsPage() {
       } else if (acc.platform === 'vk' && acc.vkToken) {
         const r = await testVKConnection(acc.vkToken);
         if (r.ok) toast.success(`✅ ${acc.name}: VK подключён (${r.name})`);
+        else toast.error(`❌ ${acc.name}: ${r.error}`);
+      } else if (acc.platform === 'ok' && acc.okToken && acc.okAppKey && acc.okAppSecretKey) {
+        const r = await testOKConnection(acc.okToken, acc.okAppKey, acc.okAppSecretKey);
+        if (r.ok) toast.success(`✅ ${acc.name}: OK подключён (${r.name})`);
         else toast.error(`❌ ${acc.name}: ${r.error}`);
       } else {
         toast('⚠️ Тест для этой платформы недоступен', { icon: 'ℹ️' });
@@ -253,11 +260,11 @@ export default function AccountsPage() {
               </div>
               <div className="bg-blue-100 rounded-lg p-3 text-xs text-blue-800 space-y-1">
                 <p className="font-medium">Как получить токен VK:</p>
-                <p>1. Идите на vk.com/dev → создайте Standalone-приложение</p>
+                <p>1. Идите на <b>dev.vk.ru</b> → создайте Standalone-приложение</p>
                 <p>2. В настройках скопируйте ID приложения</p>
                 <p>3. Откройте в браузере:</p>
                 <code className="block bg-blue-200 px-2 py-1 rounded mt-1 break-all">
-                  https://oauth.vk.com/authorize?client_id=ВАШ_ID&scope=wall,groups,offline&response_type=token&v=5.199
+                  https://oauth.vk.ru/authorize?client_id=ВАШ_ID&scope=wall,groups,stories,offline&response_type=token&v=5.199
                 </code>
                 <p>4. После разрешения — токен будет в URL (access_token=...)</p>
               </div>

@@ -3,6 +3,7 @@ import { useStore } from './store/useStore';
 import { useScheduler } from './hooks/useScheduler';
 import { useReposter } from './hooks/useReposter';
 import { useNotifications } from './hooks/useNotifications';
+import { useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import ComposerPage from './components/ComposerPage';
@@ -16,10 +17,16 @@ import ReposterPage from './components/ReposterPage';
 import AnalyticsPage from './components/AnalyticsPage';
 
 export default function App() {
-  const { activeTab, isAuthorized } = useStore();
+  const { activeTab, isAuthorized, syncAccounts } = useStore();
   useScheduler();      // ⏰ Автоматический планировщик публикаций
   useReposter();       // 🔄 Автоматический репостер
   useNotifications();  // 🔔 Push-уведомления + авто-удаление
+
+  useEffect(() => {
+    if (isAuthorized) {
+      syncAccounts();
+    }
+  }, [isAuthorized, syncAccounts]);
 
   if (!isAuthorized) {
     return (

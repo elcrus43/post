@@ -60,6 +60,8 @@ export default function ComposerPage() {
   // Расширяемые секции
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  const [isVkStory, setIsVkStory] = useState(false);
+
   // Prefill from AI
   useEffect(() => {
     const prefill = sessionStorage.getItem('composer_prefill');
@@ -69,8 +71,9 @@ export default function ComposerPage() {
     }
   }, []);
 
-  const activeAccounts = accounts.filter((a) => a.isActive);
+  const activeAccounts = accounts.filter((a) => a.id !== 'system' && a.isActive);
   const urlsInText = extractUrls(text);
+  const hasVkSelected = activeAccounts.some(a => a.platform === 'vk' && selectedAccounts.includes(a.id));
 
   // ── Медиа ────────────────────────────────────────────────────────────────────
   const handleMediaUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,6 +144,7 @@ export default function ComposerPage() {
         firstComment: firstComment.enabled ? firstComment : undefined,
         autoDelete: autoDelete.enabled ? autoDelete : undefined,
         disableComments,
+        isVkStory,
       });
       toast.success('Пост добавлен в расписание!');
       resetForm();
@@ -161,6 +165,7 @@ export default function ComposerPage() {
       firstComment: firstComment.enabled ? firstComment : undefined,
       autoDelete: autoDelete.enabled ? autoDelete : undefined,
       disableComments,
+      isVkStory,
     });
 
     const { posts } = useStore.getState();
@@ -210,6 +215,7 @@ export default function ComposerPage() {
     setDisableComments(false);
     setUtmEnabled(false);
     setUtmCampaign('');
+    setIsVkStory(false);
   };
 
   const charsLeft = MAX_CHARS - text.length;
@@ -510,6 +516,42 @@ export default function ComposerPage() {
                     </p>
                   )}
                 </div>
+                
+                {/* 5. VK Stories */}
+                {hasVkSelected && (
+                  <div className="p-4 bg-blue-50/50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-blue-100 rounded-lg">
+                          <Image size={16} className="text-blue-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">Опубликовать в Истории ВК</p>
+                          <p className="text-xs text-gray-500">Запостить медиафайл как историю вместо стены</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsVkStory(!isVkStory)}
+                        className={cn(
+                          'relative w-11 h-6 rounded-full transition-colors',
+                          isVkStory ? 'bg-blue-600' : 'bg-gray-200'
+                        )}
+                      >
+                        <div className={cn(
+                          'absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                          isVkStory ? 'translate-x-6' : 'translate-x-1'
+                        )} />
+                      </button>
+                    </div>
+                    {isVkStory && media.length === 0 && (
+                      <div className="ml-8 mt-2 text-xs text-amber-600 flex items-center gap-1">
+                        <Info size={12} />
+                        Для историй необходимо добавить хотя бы одно фото или видео
+                      </div>
+                    )}
+                  </div>
+                )}
 
               </div>
             )}
@@ -766,6 +808,11 @@ export default function ComposerPage() {
               {mentions.length > 0 && (
                 <span className="flex items-center gap-1 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg">
                   <AtSign size={11} /> {mentions.length} отметк(а/и)
+                </span>
+              )}
+              {isVkStory && (
+                <span className="flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-lg">
+                  <Image size={11} /> История ВК
                 </span>
               )}
             </div>

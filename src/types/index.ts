@@ -228,4 +228,5 @@ export interface Post {
   firstComment?: FirstComment;
   autoDelete?: AutoDelete;
   disableComments?: boolean;
+  isVkStory?: boolean;
 }

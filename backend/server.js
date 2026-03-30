@@ -6,6 +6,7 @@ const CryptoJS = require('crypto-js');
 const mongoose = require('mongoose');
 const md5 = require('md5');
 const path = require('path');
+const FormData = require('form-data');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
 
@@ -39,17 +40,24 @@ const AccountSchema = new mongoose.Schema({
   name: String,
   encryptedToken: String, // токен НИКОГДА не хранится открыто
   ownerId: String,
+  // OK-specific fields (encrypted if sensitive)
+  okAppKey: String,
+  okAppSecretKey: String, // encrypted similarly to token? Let's encrypt it too
+  okGroupId: String,
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
 const Account = mongoose.model('Account', AccountSchema);
 
 // Шифрование токена (AES-256)
-const encrypt = (token) =>
-  CryptoJS.AES.encrypt(token, process.env.ENCRYPTION_KEY).toString();
+const encrypt = (token) => {
+  if (!token) return '';
+  return CryptoJS.AES.encrypt(token, process.env.ENCRYPTION_KEY).toString();
+};
 
 // Дешифрование токена
 const decrypt = (encrypted) => {
+  if (!encrypted) return '';
   const bytes = CryptoJS.AES.decrypt(encrypted, process.env.ENCRYPTION_KEY);
   return bytes.toString(CryptoJS.enc.Utf8);
 };
@@ -108,15 +116,30 @@ app.get('/api/health', (req, res) => {
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-// Все остальные GET-запросы отправляют index.html (для React Router)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
+// Получить все аккаунты (без токенов!)
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const rawAccounts = await Account.find().sort({ createdAt: -1 });
+    const accounts = rawAccounts.map(a => ({
+      id: a._id,
+      platform: a.platform,
+      name: a.name,
+      ownerId: a.ownerId,
+      okAppKey: a.okAppKey,
+      okGroupId: a.okGroupId,
+      isActive: a.isActive,
+      createdAt: a.createdAt
+    }));
+    res.json(accounts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Сохранить аккаунт (шифрует токен перед сохранением)
 app.post('/api/accounts', async (req, res) => {
   try {
-    const { platform, name, token, ownerId } = req.body;
+    const { platform, name, token, ownerId, okAppKey, okAppSecretKey, okGroupId } = req.body;
     if (!platform || !name || !token || !ownerId) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -126,10 +149,46 @@ app.post('/api/accounts', async (req, res) => {
       name,
       ownerId,
       encryptedToken: encrypt(token),
+      okAppKey,
+      okAppSecretKey: okAppSecretKey ? encrypt(okAppSecretKey) : undefined,
+      okGroupId,
     });
 
     await account.save();
-    res.json({ id: account._id, platform, name, ownerId });
+    res.json({ 
+      id: account._id, 
+      platform, 
+      name, 
+      ownerId, 
+      okAppKey, 
+      okGroupId,
+      isActive: account.isActive,
+      createdAt: account.createdAt
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить аккаунт
+app.delete('/api/accounts/:id', async (req, res) => {
+  try {
+    await Account.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Переключить активность аккаунта
+app.patch('/api/accounts/:id/toggle', async (req, res) => {
+  try {
+    const account = await Account.findById(req.params.id);
+    if (!account) return res.status(404).json({ error: 'Not found' });
+    
+    account.isActive = !account.isActive;
+    await account.save();
+    res.json({ id: account._id, isActive: account.isActive });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -155,7 +214,7 @@ app.post('/api/publish/vk', async (req, res) => {
       return res.status(400).json({ error: 'Missing token or ownerId' });
     }
 
-    const response = await axios.post('https://api.vk.com/method/wall.post', null, {
+    const response = await axios.post('https://api.vk.ru/method/wall.post', null, {
       params: {
         owner_id: ownerId,
         message,
@@ -170,6 +229,87 @@ app.post('/api/publish/vk', async (req, res) => {
     }
     res.json(response.data.response);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Публикация в VK Stories
+app.post('/api/publish/vk/story', async (req, res) => {
+  try {
+    const { accountId, token: directToken, ownerId: directOwnerId, media, link_text, link_url } = req.body;
+    
+    let token = directToken;
+    let ownerId = directOwnerId;
+
+    if (accountId) {
+      const account = await Account.findById(accountId);
+      if (account) {
+        token = decrypt(account.encryptedToken);
+        ownerId = account.ownerId;
+      }
+    }
+
+    if (!token || !ownerId) {
+      return res.status(400).json({ error: 'Missing token or ownerId' });
+    }
+
+    if (!media || media.length === 0) {
+      return res.status(400).json({ error: 'Stories require at least one image or video' });
+    }
+
+    const firstMedia = media[0];
+    const isVideo = firstMedia.type === 'video';
+    
+    // 1. Получаем сервер для загрузки
+    const method = isVideo ? 'stories.getVideoUploadServer' : 'stories.getPhotoUploadServer';
+    const serverRes = await axios.get(`https://api.vk.ru/method/${method}`, {
+      params: {
+        access_token: token,
+        v: '5.199',
+        add_to_news: 1,
+        group_id: Math.abs(parseInt(ownerId)) || undefined,
+        link_text: link_text || undefined,
+        link_url: link_url || undefined,
+      }
+    });
+
+    if (serverRes.data.error) throw new Error(serverRes.data.error.error_msg);
+    const uploadUrl = serverRes.data.response.upload_url;
+
+    // 2. Загружаем файл
+    let fileBuffer;
+    let fileName = firstMedia.name || (isVideo ? 'video.mp4' : 'photo.jpg');
+    let contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+
+    if (firstMedia.url.startsWith('data:')) {
+      const base64Data = firstMedia.url.split(',')[1];
+      fileBuffer = Buffer.from(base64Data, 'base64');
+    } else {
+      const downloadRes = await axios.get(firstMedia.url, { responseType: 'arraybuffer' });
+      fileBuffer = Buffer.from(downloadRes.data);
+    }
+
+    const form = new FormData();
+    form.append('file', fileBuffer, { filename: fileName, contentType });
+
+    const uploadRes = await axios.post(uploadUrl, form, {
+      headers: form.getHeaders(),
+    });
+
+    // 3. Сохраняем историю
+    const saveRes = await axios.get('https://api.vk.ru/method/stories.save', {
+      params: {
+        access_token: token,
+        v: '5.199',
+        upload_results: uploadRes.data.response.upload_result,
+        extended: 1,
+      }
+    });
+
+    if (saveRes.data.error) throw new Error(saveRes.data.error.error_msg);
+    res.json(saveRes.data.response);
+  } catch (err) {
+    console.error('VK Story Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -213,7 +353,7 @@ function okSign(params, secretKey) {
     .sort()
     .map((k) => `${k}=${params[k]}`)
     .join('');
-  return md5(sorted + secretKey).toUpperCase();
+  return md5(sorted + secretKey).toLowerCase();
 }
 
 app.post('/api/publish/ok', async (req, res) => {
@@ -289,3 +429,9 @@ app.post('/api/publish/ok', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Proxy server running on port ${PORT}`));
+
+// Все остальные GET-запросы отправляют index.html (для React Router)
+// ВАЖНО: Это должно быть в самом конце!
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
