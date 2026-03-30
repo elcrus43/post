@@ -120,12 +120,12 @@ Respond in the same language the user writes in (Russian or English).
 Be concise and practical — give actionable advice, not long essays.`;
 
 // ─── API Call ─────────────────────────────────────────────────────────────────
-async function callOpenAI(
+async function callQwen(
   messages: { role: string; content: string }[],
   apiKey: string,
-  model = 'gpt-4o-mini'
+  model = 'qwen-plus' // Qwen 3.5 Plus
 ): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -141,7 +141,7 @@ async function callOpenAI(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `OpenAI error ${res.status}`);
+    throw new Error(err?.error?.message || `Qwen API Error ${res.status}`);
   }
 
   const data = await res.json();
@@ -169,9 +169,14 @@ export default function AiAssistantPage() {
   const { setActiveTab } = useStore();
 
   // API Key state
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('openai_api_key') || '');
+  const [apiKey, setApiKey] = useState(() => {
+    // Migration: copy from openai if found (optional)
+    const oldKey = localStorage.getItem('openai_api_key');
+    const newKey = localStorage.getItem('dashscope_api_key') || (oldKey && oldKey.startsWith('sk-') ? oldKey : '');
+    return newKey;
+  });
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('openai_api_key'));
+  const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('dashscope_api_key'));
 
   // Mode
   const [mode, setMode] = useState<Mode>('chat');
@@ -211,18 +216,19 @@ export default function AiAssistantPage() {
 
   // ── Save API Key ────────────────────────────────────────────────────────────
   const saveApiKey = () => {
-    if (!apiKeyInput.startsWith('sk-')) {
-      toast.error('Неверный формат ключа. Должен начинаться с sk-');
+    if (!apiKeyInput.trim()) {
+      toast.error('Введите API ключ');
       return;
     }
-    localStorage.setItem('openai_api_key', apiKeyInput);
+    localStorage.setItem('dashscope_api_key', apiKeyInput);
     setApiKey(apiKeyInput);
     setShowKeySetup(false);
-    toast.success('API ключ сохранён!');
+    toast.success('DashScope API ключ сохранён!');
   };
 
   const clearApiKey = () => {
-    localStorage.removeItem('openai_api_key');
+    localStorage.removeItem('dashscope_api_key');
+    localStorage.removeItem('openai_api_key'); // clear both for security
     setApiKey('');
     setApiKeyInput('');
     setShowKeySetup(true);
@@ -246,7 +252,7 @@ export default function AiAssistantPage() {
   // ── Chat ────────────────────────────────────────────────────────────────────
   const sendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
-    if (!apiKey) { toast.error('Сначала добавьте OpenAI API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -265,7 +271,7 @@ export default function AiAssistantPage() {
         content: m.content,
       }));
 
-      const reply = await callOpenAI(
+      const reply = await callQwen(
         [{ role: 'system', content: CHAT_SYSTEM }, ...history],
         apiKey
       );
@@ -275,7 +281,7 @@ export default function AiAssistantPage() {
         { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() },
       ]);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка OpenAI');
+      toast.error(e.message || 'Ошибка Qwen');
     } finally {
       setIsLoading(false);
     }
@@ -284,13 +290,13 @@ export default function AiAssistantPage() {
   // ── Humanize ────────────────────────────────────────────────────────────────
   const humanize = async () => {
     if (!humanizerInput.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте OpenAI API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
 
     setHumanizerLoading(true);
     setHumanizerOutput('');
 
     try {
-      const result = await callOpenAI(
+      const result = await callQwen(
         [
           { role: 'system', content: HUMANIZER_SYSTEM },
           { role: 'user', content: humanizerInput },
@@ -299,7 +305,7 @@ export default function AiAssistantPage() {
       );
       setHumanizerOutput(result);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка OpenAI');
+      toast.error(e.message || 'Ошибка Qwen');
     } finally {
       setHumanizerLoading(false);
     }
@@ -308,7 +314,7 @@ export default function AiAssistantPage() {
   // ── Generate ────────────────────────────────────────────────────────────────
   const generate = async () => {
     if (!genTopic.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте OpenAI API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
 
     setGenLoading(true);
     setGenOutput('');
@@ -316,17 +322,17 @@ export default function AiAssistantPage() {
     try {
       const userPrompt = `Write a social media post about: ${genTopic}${genExtraContext ? `\n\nAdditional context: ${genExtraContext}` : ''}`;
 
-      const result = await callOpenAI(
+      const result = await callQwen(
         [
           { role: 'system', content: getGeneratorSystem(genPlatform, genTone) },
           { role: 'user', content: userPrompt },
         ],
         apiKey,
-        'gpt-4o'
+        'qwen-max'
       );
       setGenOutput(result);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка OpenAI');
+      toast.error(e.message || 'Ошибка Qwen');
     } finally {
       setGenLoading(false);
     }
@@ -344,7 +350,7 @@ export default function AiAssistantPage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900">AI Ассистент</h1>
-              <p className="text-xs text-gray-500">GPT-4 · Humanizer · Генератор постов</p>
+              <p className="text-xs text-gray-500">Qwen 3.5 · Humanizer · Генератор постов</p>
             </div>
           </div>
 
@@ -369,11 +375,11 @@ export default function AiAssistantPage() {
             <div className="flex items-start gap-3 mb-3">
               <AlertCircle size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-violet-800">
-                <p className="font-semibold mb-1">Нужен OpenAI API ключ</p>
+                <p className="font-semibold mb-1">Нужен DashScope API ключ</p>
                 <p className="text-xs text-violet-600">
                   Получите на{' '}
-                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline font-medium">
-                    platform.openai.com/api-keys
+                  <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                    dashscope.console.aliyun.com
                   </a>
                   {' '}· Ключ хранится только в вашем браузере (localStorage)
                 </p>
@@ -385,7 +391,7 @@ export default function AiAssistantPage() {
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && saveApiKey()}
-                placeholder="sk-proj-..."
+                placeholder="Ключ DashScope (sk-...)"
                 className="flex-1 px-3 py-2 text-sm border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
               />
               <button
@@ -627,7 +633,7 @@ export default function AiAssistantPage() {
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-xs">AI убирает лишнее...</span>
+                      <span className="text-xs">Qwen убирает лишнее...</span>
                     </div>
                   ) : humanizerOutput ? (
                     humanizerOutput
@@ -797,7 +803,7 @@ export default function AiAssistantPage() {
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-xs">GPT-4 пишет пост...</span>
+                      <span className="text-xs">Qwen 3.5 пишет пост...</span>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{genOutput}</p>
