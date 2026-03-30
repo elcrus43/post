@@ -72,7 +72,7 @@ export const useStore = create<AppStore>()(
       repostHistory: [],
       utmPresets: [],
       analyticsEntries: [],
-      backendUrl: 'https://post-production-01fa.up.railway.app',
+      backendUrl: typeof window !== 'undefined' ? window.location.origin : 'https://post-production-01fa.up.railway.app',
       useBackend: true,
       isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
       aiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
