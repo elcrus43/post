@@ -436,6 +436,7 @@ app.post('/api/ai/proxy', async (req, res) => {
       return res.status(400).json({ error: 'Missing required AI parameters' });
     }
 
+    const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
     console.log(`🤖 AI Proxy request to ${cleanBaseUrl} | Model: ${model}`);
     
     const response = await axios.post(`${cleanBaseUrl}/chat/completions`, {
