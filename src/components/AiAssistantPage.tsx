@@ -139,7 +139,9 @@ async function callAI(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error?.message || err?.error || `Proxy Error ${res.status}`);
+      console.error('AI Proxy request failed:', { status: res.status, error: err });
+      const msg = err.error?.message || err.error || err.details || `Proxy Error ${res.status}`;
+      throw new Error(msg);
     }
 
     const data = await res.json();
@@ -206,6 +208,7 @@ export default function AiAssistantPage() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('gemini_api_key'));
   const [showApiSettings, setShowApiSettings] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
 
   // Mode
   const [mode, setMode] = useState<Mode>('chat');
@@ -262,6 +265,34 @@ export default function AiAssistantPage() {
     setApiKey('');
     setApiKeyInput('');
     setShowKeySetup(true);
+  };
+
+  const testAiConnection = async () => {
+    if (!apiKey) {
+      toast.error('Сначала добавьте API ключ');
+      setShowKeySetup(true);
+      return;
+    }
+    setIsTesting(true);
+    try {
+      const result = await callAI(
+        [{ role: 'user', content: 'Say "OK" if you can hear me.' }],
+        apiKey,
+        aiBaseUrl,
+        aiModel,
+        { enabled: useBackend, url: backendUrl }
+      );
+      if (result) {
+        toast.success(`Соединение установлено! Ответ: ${result}`);
+      } else {
+        throw new Error('Получен пустой ответ от ИИ');
+      }
+    } catch (e: any) {
+      console.error('AI Test Connection failed:', e);
+      toast.error(`Ошибка соединения: ${e.message}`);
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   // ── Copy helper ─────────────────────────────────────────────────────────────
@@ -449,28 +480,43 @@ export default function AiAssistantPage() {
               </div>
             </div>
 
-            <div className="mt-4">
-              <label className="block text-xs font-medium text-gray-500 mb-2">Быстрые пресеты:</label>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { name: 'Gemini (Flash)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-flash' },
-                  { name: 'Gemini (Pro)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-pro' },
-                  { name: 'DashScope', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
-                  { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct' },
-                ].map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => {
-                      setAiBaseUrl(preset.url);
-                      setAiModel(preset.model);
-                      toast.success(`Пресет ${preset.name} применен`);
-                    }}
-                    className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium hover:border-violet-300 hover:text-violet-600 transition-all"
-                  >
-                    {preset.name}
-                  </button>
-                ))}
+            <div className="mt-4 flex items-center justify-between">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-2">Быстрые пресеты:</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { name: 'Gemini (Flash)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-flash' },
+                    { name: 'Gemini (Pro)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-pro' },
+                    { name: 'DashScope', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
+                    { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => {
+                        setAiBaseUrl(preset.url);
+                        setAiModel(preset.model);
+                        toast.success(`Пресет ${preset.name} применен`);
+                      }}
+                      className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium hover:border-violet-300 hover:text-violet-600 transition-all"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <button
+                onClick={testAiConnection}
+                disabled={isTesting}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+                  isTesting 
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                    : "bg-violet-600 text-white hover:bg-violet-700 shadow-sm"
+                )}
+              >
+                {isTesting ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
+                {isTesting ? 'Проверка...' : 'Тест Соединения'}
+              </button>
             </div>
           </div>
         )}
