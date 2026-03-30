@@ -439,7 +439,15 @@ app.post('/api/ai/proxy', async (req, res) => {
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
     console.log(`🤖 AI Proxy request to ${cleanBaseUrl} | Model: ${model}`);
     
-    const response = await axios.post(`${cleanBaseUrl}/chat/completions`, {
+    // Google Gemini API often requires key as a query parameter (?key=...) 
+    // even for its OpenAI-compatible endpoint.
+    let finalUrl = `${cleanBaseUrl}/chat/completions`;
+    if (cleanBaseUrl.includes('googleapis.com')) {
+      const separator = finalUrl.includes('?') ? '&' : '?';
+      finalUrl = `${finalUrl}${separator}key=${apiKey}`;
+    }
+
+    const response = await axios.post(finalUrl, {
       model,
       messages,
       temperature: 0.8,
