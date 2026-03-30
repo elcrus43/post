@@ -120,13 +120,14 @@ Respond in the same language the user writes in (Russian or English).
 Be concise and practical — give actionable advice, not long essays.`;
 
 // ─── API Call ─────────────────────────────────────────────────────────────────
-async function callQwen(
+async function callAI(
   messages: { role: string; content: string }[],
   apiKey: string,
   baseUrl: string,
   modelName: string
 ): Promise<string> {
-  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+  const res = await fetch(`${cleanBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -142,7 +143,7 @@ async function callQwen(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Qwen API Error ${res.status}`);
+    throw new Error(err?.error?.message || `AI API Error ${res.status}`);
   }
 
   const data = await res.json();
@@ -177,11 +178,11 @@ export default function AiAssistantPage() {
 
   // API Key state
   const [apiKey, setApiKey] = useState(() => {
-    // Migration: copy from dashscope key name if found
-    return localStorage.getItem('dashscope_api_key') || localStorage.getItem('openai_api_key') || '';
+    // Migration: prefer gemini/google key names if found
+    return localStorage.getItem('gemini_api_key') || localStorage.getItem('dashscope_api_key') || localStorage.getItem('openai_api_key') || '';
   });
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('dashscope_api_key'));
+  const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('gemini_api_key'));
   const [showApiSettings, setShowApiSettings] = useState(false);
 
   // Mode
@@ -226,15 +227,16 @@ export default function AiAssistantPage() {
       toast.error('Введите API ключ');
       return;
     }
-    localStorage.setItem('dashscope_api_key', apiKeyInput);
+    localStorage.setItem('gemini_api_key', apiKeyInput);
     setApiKey(apiKeyInput);
     setShowKeySetup(false);
-    toast.success('API ключ Qwen сохранён!');
+    toast.success('Gemini API ключ сохранён!');
   };
 
   const clearApiKey = () => {
+    localStorage.removeItem('gemini_api_key');
     localStorage.removeItem('dashscope_api_key');
-    localStorage.removeItem('openai_api_key'); // clear both for security
+    localStorage.removeItem('openai_api_key');
     setApiKey('');
     setApiKeyInput('');
     setShowKeySetup(true);
@@ -258,7 +260,7 @@ export default function AiAssistantPage() {
   // ── Chat ────────────────────────────────────────────────────────────────────
   const sendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
-    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Gemini'); return; }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -277,7 +279,7 @@ export default function AiAssistantPage() {
         content: m.content,
       }));
 
-      const reply = await callQwen(
+      const reply = await callAI(
         [{ role: 'system', content: CHAT_SYSTEM }, ...history],
         apiKey,
         aiBaseUrl,
@@ -289,7 +291,7 @@ export default function AiAssistantPage() {
         { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() },
       ]);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка Qwen');
+      toast.error(e.message || 'Ошибка Gemini');
     } finally {
       setIsLoading(false);
     }
@@ -298,13 +300,13 @@ export default function AiAssistantPage() {
   // ── Humanize ────────────────────────────────────────────────────────────────
   const humanize = async () => {
     if (!humanizerInput.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Gemini'); return; }
 
     setHumanizerLoading(true);
     setHumanizerOutput('');
 
     try {
-      const result = await callQwen(
+      const result = await callAI(
         [
           { role: 'system', content: HUMANIZER_SYSTEM },
           { role: 'user', content: humanizerInput },
@@ -315,7 +317,7 @@ export default function AiAssistantPage() {
       );
       setHumanizerOutput(result);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка Qwen');
+      toast.error(e.message || 'Ошибка Gemini');
     } finally {
       setHumanizerLoading(false);
     }
@@ -324,7 +326,7 @@ export default function AiAssistantPage() {
   // ── Generate ────────────────────────────────────────────────────────────────
   const generate = async () => {
     if (!genTopic.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Gemini'); return; }
 
     setGenLoading(true);
     setGenOutput('');
@@ -332,7 +334,7 @@ export default function AiAssistantPage() {
     try {
       const userPrompt = `Write a social media post about: ${genTopic}${genExtraContext ? `\n\nAdditional context: ${genExtraContext}` : ''}`;
 
-      const result = await callQwen(
+      const result = await callAI(
         [
           { role: 'system', content: getGeneratorSystem(genPlatform, genTone) },
           { role: 'user', content: userPrompt },
@@ -343,7 +345,7 @@ export default function AiAssistantPage() {
       );
       setGenOutput(result);
     } catch (e: any) {
-      toast.error(e.message || 'Ошибка Qwen');
+      toast.error(e.message || 'Ошибка Gemini');
     } finally {
       setGenLoading(false);
     }
@@ -361,7 +363,7 @@ export default function AiAssistantPage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900">AI Ассистент</h1>
-              <p className="text-xs text-gray-500">Qwen 3.5 · Humanizer · Генератор постов</p>
+              <p className="text-xs text-gray-500">Gemini 1.5 · Humanizer · Генератор постов</p>
             </div>
           </div>
 
@@ -426,9 +428,10 @@ export default function AiAssistantPage() {
               <label className="block text-xs font-medium text-gray-500 mb-2">Быстрые пресеты:</label>
               <div className="flex flex-wrap gap-2">
                 {[
+                  { name: 'Gemini (Flash)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-flash' },
+                  { name: 'Gemini (Pro)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-1.5-pro' },
                   { name: 'DashScope', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
                   { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct' },
-                  { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', model: 'qwen/qwen-2.5-72b-instruct' },
                 ].map((preset) => (
                   <button
                     key={preset.name}
@@ -453,13 +456,13 @@ export default function AiAssistantPage() {
             <div className="flex items-start gap-3 mb-3">
               <AlertCircle size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-violet-800">
-                <p className="font-semibold mb-1">Нужна авторизация Qwen</p>
+                <p className="font-semibold mb-1">Нужeн Gemini API ключ</p>
                 <p className="text-xs text-violet-600">
-                  Перейдите на{' '}
-                  <a href="https://chat.qwen.ai/" target="_blank" rel="noopener noreferrer" className="underline font-medium">
-                    chat.qwen.ai
+                  Получите на{' '}
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                    aistudio.google.com
                   </a>
-                  {' '}· Авторизуйтесь и получите API ключ в настройках профиля
+                  {' '}· Ключ хранится только в вашем браузере
                 </p>
               </div>
             </div>
@@ -469,7 +472,7 @@ export default function AiAssistantPage() {
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && saveApiKey()}
-                placeholder="API ключ Qwen..."
+                placeholder="API ключ Gemini..."
                 className="flex-1 px-3 py-2 text-sm border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
               />
               <button
@@ -711,7 +714,7 @@ export default function AiAssistantPage() {
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-xs">Qwen убирает лишнее...</span>
+                      <span className="text-xs">Gemini убирает лишнее...</span>
                     </div>
                   ) : humanizerOutput ? (
                     humanizerOutput
@@ -881,7 +884,7 @@ export default function AiAssistantPage() {
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-xs">Qwen 3.5 пишет пост...</span>
+                      <span className="text-xs">Gemini 1.5 пишет пост...</span>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{genOutput}</p>

@@ -75,8 +75,8 @@ export const useStore = create<AppStore>()(
       backendUrl: 'https://post-production-01fa.up.railway.app',
       useBackend: true,
       isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
-      aiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      aiModel: 'qwen-max',
+      aiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      aiModel: 'gemini-1.5-flash',
 
       setAiBaseUrl: (url) => set({ aiBaseUrl: url }),
       setAiModel: (model) => set({ aiModel: model }),
