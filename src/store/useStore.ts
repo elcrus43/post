@@ -313,6 +313,17 @@ export const useStore = create<AppStore>()(
 
       setActiveTab: (tab: string) => set({ activeTab: tab }),
     }),
-    { name: 'autopost-storage' }
+    { 
+      name: 'autopost-storage',
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          const oldUrl = 'https://post-production-01fa.up.railway.app';
+          if (state.backendUrl === oldUrl) {
+            console.log('🔄 Automated reset of stale backend URL');
+            state.backendUrl = typeof window !== 'undefined' ? window.location.origin : oldUrl;
+          }
+        }
+      }
+    }
   )
 );

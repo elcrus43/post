@@ -1,4 +1,4 @@
-import { ExternalLink, Info, Server, Shield, Globe } from 'lucide-react';
+import { ExternalLink, Info, Shield } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
@@ -18,6 +18,13 @@ export default function SettingsPage() {
     } catch (e) {
       toast.error('Ошибка сохранения');
     }
+  };
+
+  const handleResetBackend = () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    setUrlInput(origin);
+    setBackendConfig(origin, useBackend);
+    toast.success('Настройки сброшены на текущий хост');
   };
 
   return (
@@ -52,6 +59,13 @@ export default function SettingsPage() {
                   className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 transition-colors shadow-sm"
                 >
                   Сохранить
+                </button>
+                <button
+                  onClick={handleResetBackend}
+                  title="Сбросить на текущий хост"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Сбросить (Авто)
                 </button>
               </div>
             </div>

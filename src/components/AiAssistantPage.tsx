@@ -148,7 +148,8 @@ async function callAI(
       else if (typeof err.error === 'object') msg = JSON.stringify(err.error);
       else msg = `Proxy Error ${res.status}`;
 
-      throw new Error(msg);
+      const proxyUrl = proxyConfig?.url || 'unknown-origin';
+      throw new Error(`${msg} (at ${proxyUrl})`);
     }
 
     const data = await res.json();
