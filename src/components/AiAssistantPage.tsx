@@ -123,16 +123,17 @@ Be concise and practical — give actionable advice, not long essays.`;
 async function callQwen(
   messages: { role: string; content: string }[],
   apiKey: string,
-  model = 'qwen-plus' // Qwen 3.5 Plus
+  baseUrl: string,
+  modelName: string
 ): Promise<string> {
-  const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model,
+      model: modelName,
       messages,
       temperature: 0.8,
       max_tokens: 2000,
@@ -166,17 +167,22 @@ const toneLabels: Record<Tone, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function AiAssistantPage() {
-  const { setActiveTab } = useStore();
+  const { 
+    setActiveTab, 
+    aiBaseUrl, 
+    setAiBaseUrl, 
+    aiModel, 
+    setAiModel 
+  } = useStore();
 
   // API Key state
   const [apiKey, setApiKey] = useState(() => {
-    // Migration: copy from openai if found (optional)
-    const oldKey = localStorage.getItem('openai_api_key');
-    const newKey = localStorage.getItem('dashscope_api_key') || (oldKey && oldKey.startsWith('sk-') ? oldKey : '');
-    return newKey;
+    // Migration: copy from dashscope key name if found
+    return localStorage.getItem('dashscope_api_key') || localStorage.getItem('openai_api_key') || '';
   });
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('dashscope_api_key'));
+  const [showApiSettings, setShowApiSettings] = useState(false);
 
   // Mode
   const [mode, setMode] = useState<Mode>('chat');
@@ -273,7 +279,9 @@ export default function AiAssistantPage() {
 
       const reply = await callQwen(
         [{ role: 'system', content: CHAT_SYSTEM }, ...history],
-        apiKey
+        apiKey,
+        aiBaseUrl,
+        aiModel
       );
 
       setMessages((prev) => [
@@ -301,7 +309,9 @@ export default function AiAssistantPage() {
           { role: 'system', content: HUMANIZER_SYSTEM },
           { role: 'user', content: humanizerInput },
         ],
-        apiKey
+        apiKey,
+        aiBaseUrl,
+        aiModel
       );
       setHumanizerOutput(result);
     } catch (e: any) {
@@ -328,7 +338,8 @@ export default function AiAssistantPage() {
           { role: 'user', content: userPrompt },
         ],
         apiKey,
-        'qwen-max'
+        aiBaseUrl,
+        aiModel
       );
       setGenOutput(result);
     } catch (e: any) {
@@ -355,19 +366,86 @@ export default function AiAssistantPage() {
           </div>
 
           {/* API Key indicator */}
-          <button
-            onClick={() => setShowKeySetup(!showKeySetup)}
-            className={cn(
-              'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-              apiKey
-                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                : 'bg-red-50 text-red-700 hover:bg-red-100'
-            )}
-          >
-            <Key size={12} />
-            {apiKey ? 'API ключ настроен' : 'Добавить API ключ'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowApiSettings(!showApiSettings)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-gray-100 text-gray-700 hover:bg-gray-200'
+              )}
+            >
+              <RefreshCw size={12} className={cn(showApiSettings && 'rotate-180')} />
+              API Настройки
+            </button>
+            <button
+              onClick={() => setShowKeySetup(!showKeySetup)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                apiKey
+                  ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'bg-red-50 text-red-700 hover:bg-red-100'
+              )}
+            >
+              <Key size={12} />
+              {apiKey ? 'Ключ настроен' : 'Добавить ключ'}
+            </button>
+          </div>
         </div>
+
+        {/* API Settings Panel */}
+        {showApiSettings && (
+          <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+            <div className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-700">
+              <Zap size={14} className="text-violet-600" />
+              Расширенные настройки API
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">API Endpoint (Base URL)</label>
+                <input
+                  type="text"
+                  value={aiBaseUrl}
+                  onChange={(e) => setAiBaseUrl(e.target.value)}
+                  placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Model Name</label>
+                <input
+                  type="text"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  placeholder="qwen-plus"
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-gray-500 mb-2">Быстрые пресеты:</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { name: 'DashScope', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
+                  { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct' },
+                  { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', model: 'qwen/qwen-2.5-72b-instruct' },
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => {
+                      setAiBaseUrl(preset.url);
+                      setAiModel(preset.model);
+                      toast.success(`Пресет ${preset.name} применен`);
+                    }}
+                    className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium hover:border-violet-300 hover:text-violet-600 transition-all"
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* API Key Setup Panel */}
         {showKeySetup && (

@@ -19,6 +19,12 @@ interface AppStore {
   backendUrl: string | null;
   useBackend: boolean;
   isAuthorized: boolean;
+  
+  // AI Assistant Config
+  aiBaseUrl: string;
+  aiModel: string;
+  setAiBaseUrl: (url: string) => void;
+  setAiModel: (model: string) => void;
 
   addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => void;
   updateAccount: (id: string, updates: Partial<Account>) => void;
@@ -69,6 +75,11 @@ export const useStore = create<AppStore>()(
       backendUrl: 'https://post-production-01fa.up.railway.app',
       useBackend: true,
       isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
+      aiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      aiModel: 'qwen-max',
+
+      setAiBaseUrl: (url) => set({ aiBaseUrl: url }),
+      setAiModel: (model) => set({ aiModel: model }),
 
       syncAccounts: async () => {
         const { useBackend, backendUrl } = get();
