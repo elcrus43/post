@@ -131,7 +131,13 @@ async function callAI(
   
   // Use proxy if enabled and available
   if (proxyConfig?.enabled && proxyConfig?.url) {
-    const res = await fetch(`${proxyConfig.url.replace(/\/+$/, '')}/api/ai/proxy`, {
+    const isSameOrigin = typeof window !== 'undefined' && proxyConfig.url === window.location.origin;
+    const finalProxyBase = isSameOrigin ? '' : proxyConfig.url.replace(/\/+$/, '');
+    const proxyApiUrl = `${finalProxyBase}/api/ai/proxy`;
+    
+    console.debug(`🤖 AI call via proxy: ${proxyApiUrl}`);
+
+    const res = await fetch(proxyApiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ baseUrl: cleanBaseUrl, apiKey, model: modelName, messages }),
