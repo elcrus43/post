@@ -140,7 +140,14 @@ async function callAI(
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error('AI Proxy request failed:', { status: res.status, error: err });
-      const msg = err.error?.message || err.error || err.details || `Proxy Error ${res.status}`;
+      
+      let msg = 'Unknown Error';
+      if (typeof err.error === 'string') msg = err.error;
+      else if (err.error?.message) msg = err.error.message;
+      else if (err.details) msg = err.details;
+      else if (typeof err.error === 'object') msg = JSON.stringify(err.error);
+      else msg = `Proxy Error ${res.status}`;
+
       throw new Error(msg);
     }
 
