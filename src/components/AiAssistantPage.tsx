@@ -381,7 +381,11 @@ export default function AiAssistantPage() {
                   <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank" rel="noopener noreferrer" className="underline font-medium">
                     dashscope.console.aliyun.com
                   </a>
-                  {' '}· Ключ хранится только в вашем браузере (localStorage)
+                  {' '} или через {' '}
+                  <a href="https://chat.qwen.ai/" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                    chat.qwen.ai
+                  </a>
+                  {' '}· Ключ хранится только в вашем браузере
                 </p>
               </div>
             </div>
