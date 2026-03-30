@@ -223,7 +223,7 @@ export default function AiAssistantPage() {
     localStorage.setItem('dashscope_api_key', apiKeyInput);
     setApiKey(apiKeyInput);
     setShowKeySetup(false);
-    toast.success('DashScope API ключ сохранён!');
+    toast.success('API ключ Qwen сохранён!');
   };
 
   const clearApiKey = () => {
@@ -252,7 +252,7 @@ export default function AiAssistantPage() {
   // ── Chat ────────────────────────────────────────────────────────────────────
   const sendMessage = async () => {
     if (!chatInput.trim() || isLoading) return;
-    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -290,7 +290,7 @@ export default function AiAssistantPage() {
   // ── Humanize ────────────────────────────────────────────────────────────────
   const humanize = async () => {
     if (!humanizerInput.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
 
     setHumanizerLoading(true);
     setHumanizerOutput('');
@@ -314,7 +314,7 @@ export default function AiAssistantPage() {
   // ── Generate ────────────────────────────────────────────────────────────────
   const generate = async () => {
     if (!genTopic.trim()) return;
-    if (!apiKey) { toast.error('Сначала добавьте DashScope API ключ'); return; }
+    if (!apiKey) { toast.error('Сначала добавьте API ключ Qwen'); return; }
 
     setGenLoading(true);
     setGenOutput('');
@@ -375,17 +375,13 @@ export default function AiAssistantPage() {
             <div className="flex items-start gap-3 mb-3">
               <AlertCircle size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-violet-800">
-                <p className="font-semibold mb-1">Нужен DashScope API ключ</p>
+                <p className="font-semibold mb-1">Нужна авторизация Qwen</p>
                 <p className="text-xs text-violet-600">
-                  Получите на{' '}
-                  <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank" rel="noopener noreferrer" className="underline font-medium">
-                    dashscope.console.aliyun.com
-                  </a>
-                  {' '} или через {' '}
+                  Перейдите на{' '}
                   <a href="https://chat.qwen.ai/" target="_blank" rel="noopener noreferrer" className="underline font-medium">
                     chat.qwen.ai
                   </a>
-                  {' '}· Ключ хранится только в вашем браузере
+                  {' '}· Авторизуйтесь и получите API ключ в настройках профиля
                 </p>
               </div>
             </div>
@@ -395,7 +391,7 @@ export default function AiAssistantPage() {
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && saveApiKey()}
-                placeholder="Ключ DashScope (sk-...)"
+                placeholder="API ключ Qwen..."
                 className="flex-1 px-3 py-2 text-sm border border-violet-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
               />
               <button
