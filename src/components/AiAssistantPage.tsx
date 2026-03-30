@@ -124,9 +124,29 @@ async function callAI(
   messages: { role: string; content: string }[],
   apiKey: string,
   baseUrl: string,
-  modelName: string
+  modelName: string,
+  proxyConfig?: { enabled: boolean; url: string | null }
 ): Promise<string> {
   const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+  
+  // Use proxy if enabled and available
+  if (proxyConfig?.enabled && proxyConfig?.url) {
+    const res = await fetch(`${proxyConfig.url.replace(/\/+$/, '')}/api/ai/proxy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: cleanBaseUrl, apiKey, model: modelName, messages }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || err?.error || `Proxy Error ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.choices[0]?.message?.content?.trim() || '';
+  }
+
+  // Fallback to direct call (may fail due to CORS for Gemini)
   const res = await fetch(`${cleanBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -173,7 +193,9 @@ export default function AiAssistantPage() {
     aiBaseUrl, 
     setAiBaseUrl, 
     aiModel, 
-    setAiModel 
+    setAiModel,
+    useBackend,
+    backendUrl
   } = useStore();
 
   // API Key state
@@ -283,7 +305,8 @@ export default function AiAssistantPage() {
         [{ role: 'system', content: CHAT_SYSTEM }, ...history],
         apiKey,
         aiBaseUrl,
-        aiModel
+        aiModel,
+        { enabled: useBackend, url: backendUrl }
       );
 
       setMessages((prev) => [
@@ -313,7 +336,8 @@ export default function AiAssistantPage() {
         ],
         apiKey,
         aiBaseUrl,
-        aiModel
+        aiModel,
+        { enabled: useBackend, url: backendUrl }
       );
       setHumanizerOutput(result);
     } catch (e: any) {
@@ -341,7 +365,8 @@ export default function AiAssistantPage() {
         ],
         apiKey,
         aiBaseUrl,
-        aiModel
+        aiModel,
+        { enabled: useBackend, url: backendUrl }
       );
       setGenOutput(result);
     } catch (e: any) {

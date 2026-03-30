@@ -427,6 +427,39 @@ app.post('/api/publish/ok', async (req, res) => {
   }
 });
 
+// AI Proxy (for Gemini/Qwen via browser to avoid CORS)
+app.post('/api/ai/proxy', async (req, res) => {
+  try {
+    const { baseUrl, apiKey, model, messages } = req.body;
+
+    if (!baseUrl || !apiKey || !model || !messages) {
+      return res.status(400).json({ error: 'Missing required AI parameters' });
+    }
+
+    const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+    
+    const response = await axios.post(`${cleanBaseUrl}/chat/completions`, {
+      model,
+      messages,
+      temperature: 0.8,
+      max_tokens: 2000,
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      timeout: 30000 // 30s timeout for AI response
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error('AI Proxy Error:', err.response?.data || err.message);
+    const status = err.response?.status || 500;
+    const errorData = err.response?.data?.error || { message: err.message };
+    res.status(status).json({ error: errorData });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Proxy server running on port ${PORT}`));
 
