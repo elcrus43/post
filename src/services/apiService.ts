@@ -9,6 +9,19 @@ import { useStore } from '../store/useStore';
 const CORS_PROXY = 'https://corsproxy.io/?';
 
 function proxied(url: string): string {
+  const { backendUrl, useBackend } = useStore.getState();
+  
+  if (useBackend && backendUrl) {
+    // Используем наш бэкенд прокси для VK и OK
+    if (url.includes('api.vk.ru') || url.includes('api.vk.com')) {
+      return url.replace(/https:\/\/api\.vk\.(ru|com)/, `${backendUrl}/vk`);
+    }
+    if (url.includes('api.ok.ru')) {
+      return url.replace('https://api.ok.ru', `${backendUrl}/ok`);
+    }
+  }
+
+  // Fallback на публичный CORS-прокси
   return `${CORS_PROXY}${encodeURIComponent(url)}`;
 }
 
@@ -133,15 +146,8 @@ async function postToVK(account: Account, post: Post): Promise<PostResult> {
 
     const url = `https://api.vk.ru/method/wall.post?${params}`;
 
-    // Пробуем сначала напрямую, при CORS-ошибке — через прокси
-    let data: Record<string, unknown>;
-    try {
-      const res = await fetch(url, { mode: 'cors' });
-      data = await res.json();
-    } catch {
-      const res = await fetch(proxied(url));
-      data = await res.json();
-    }
+    const res = await fetch(proxied(url));
+    const data = await res.json();
 
     if (data.error) {
       const err = data.error as { error_code: number; error_msg: string };
@@ -167,14 +173,9 @@ export async function testVKConnection(token: string): Promise<{ ok: boolean; na
   try {
     const params = new URLSearchParams({ access_token: token, v: '5.199' });
     const url = `https://api.vk.ru/method/users.get?${params}`;
-    let data: Record<string, unknown>;
-    try {
-      const res = await fetch(url, { mode: 'cors' });
-      data = await res.json();
-    } catch {
-      const res = await fetch(proxied(url));
-      data = await res.json();
-    }
+    
+    const res = await fetch(proxied(url));
+    const data = await res.json();
     if (data.error) {
       const err = data.error as { error_msg: string };
       return { ok: false, error: err.error_msg };
@@ -232,14 +233,8 @@ async function postToOK(account: Account, post: Post): Promise<PostResult> {
 
     const url = `https://api.ok.ru/fb.do?${urlParams}`;
 
-    let data: unknown;
-    try {
-      const res = await fetch(url, { mode: 'cors' });
-      data = await res.json();
-    } catch {
-      const res = await fetch(proxied(url));
-      data = await res.json();
-    }
+    const res = await fetch(proxied(url));
+    const data = await res.json();
 
     const d = data as Record<string, unknown>;
     if (d.error_code) throw new Error(`[${d.error_code}] ${d.error_msg}`);
@@ -268,14 +263,8 @@ export async function testOKConnection(token: string, appKey: string, appSecret:
     const urlParams = new URLSearchParams({ ...params, sig, access_token: token });
     const url = `https://api.ok.ru/fb.do?${urlParams}`;
 
-    let data: any;
-    try {
-      const res = await fetch(url, { mode: 'cors' });
-      data = await res.json();
-    } catch {
-      const res = await fetch(proxied(url));
-      data = await res.json();
-    }
+    const res = await fetch(proxied(url));
+    const data = await res.json();
 
     if (data.error_code) {
       return { ok: false, error: `[${data.error_code}] ${data.error_msg}` };

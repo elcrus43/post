@@ -7,6 +7,7 @@ const mongoose = require('mongoose');
 const md5 = require('md5');
 const path = require('path');
 const FormData = require('form-data');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
 
@@ -28,6 +29,10 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '50mb' }));
+
+// Прокси для VK и OK (для прямого обращения с фронтенда без CORS)
+app.use("/vk", createProxyMiddleware({ target: "https://api.vk.com", changeOrigin: true }));
+app.use("/ok", createProxyMiddleware({ target: "https://api.ok.ru", changeOrigin: true }));
 
 // Подключение к MongoDB
 mongoose.connect(process.env.MONGO_URI)
@@ -124,9 +129,12 @@ app.get('/api/accounts', async (req, res) => {
       id: a._id,
       platform: a.platform,
       name: a.name,
-      ownerId: a.ownerId,
+      ownerId: a.ownerId, // сохраняем для совместимости
+      // Мапим обратно во фронтенд-поля
+      vkOwnerId: a.platform === 'vk' ? a.ownerId : undefined,
+      tgChatId: a.platform === 'telegram' ? a.ownerId : undefined,
+      okGroupId: a.platform === 'ok' ? a.okGroupId : undefined,
       okAppKey: a.okAppKey,
-      okGroupId: a.okGroupId,
       isActive: a.isActive,
       createdAt: a.createdAt
     }));
@@ -136,11 +144,201 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
+// ─── VK OAuth 2.0 (Server-Side) ───────────────────────────────────────────────
+
+app.get('/api/auth/vk', (req, res) => {
+  const clientId = process.env.VK_CLIENT_ID;
+  const redirectUri = process.env.VK_REDIRECT_URI;
+  
+  if (!clientId || !redirectUri) {
+    return res.status(500).json({ error: 'VK OAuth credentials not configured in .env' });
+  }
+
+  // Запрашиваем права на стену, группы, истории и бессрочный токен (offline)
+  const vkAuthUrl = `https://oauth.vk.com/authorize?client_id=${clientId}&display=page&redirect_uri=${encodeURIComponent(redirectUri)}&scope=wall,groups,stories,offline&response_type=code&v=5.199`;
+  
+  res.redirect(vkAuthUrl);
+});
+
+app.get('/api/auth/vk/callback', async (req, res) => {
+  const { code, error, error_description } = req.query;
+
+  if (error) {
+    return res.status(400).send(`VK Auth Error: ${error_description || error}`);
+  }
+
+  if (!code) {
+    return res.status(400).send('No code received from VK');
+  }
+
+  try {
+    // Обмениваем код на токен
+    const tokenRes = await axios.get('https://oauth.vk.com/access_token', {
+      params: {
+        client_id: process.env.VK_CLIENT_ID,
+        client_secret: process.env.VK_CLIENT_SECRET,
+        redirect_uri: process.env.VK_REDIRECT_URI,
+        code,
+      }
+    });
+
+    const { access_token, user_id, email } = tokenRes.data;
+
+    if (!access_token) {
+      return res.status(400).send('Failed to obtain access token from VK');
+    }
+
+    // Получаем информацию о пользователе для базы
+    const userRes = await axios.get('https://api.vk.com/method/users.get', {
+      params: {
+        access_token,
+        v: '5.199',
+        fields: 'photo_100'
+      }
+    });
+
+    const userData = userRes.data.response[0];
+    const name = `${userData.first_name} ${userData.last_name}`;
+
+    // Сохраняют или обновляют аккаунт в базе.
+    // Находим существующий или создаем новый.
+    let account = await Account.findOne({ platform: 'vk', ownerId: String(user_id) });
+    
+    if (account) {
+      account.name = name;
+      account.encryptedToken = encrypt(access_token);
+      account.isActive = true;
+      await account.save();
+    } else {
+      account = new Account({
+        platform: 'vk',
+        name,
+        ownerId: String(user_id),
+        encryptedToken: encrypt(access_token),
+        isActive: true,
+        createdAt: new Date(),
+      });
+      await account.save();
+    }
+
+    // Перенаправляем пользователя обратно на фронтенд
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/accounts?success=vk_added`);
+  } catch (err) {
+    console.error('VK Callback Error:', err.response?.data || err.message);
+    res.status(500).send('Internal server error during VK authentication');
+  }
+});
+
+// ─── OK OAuth 2.0 (Server-Side) ───────────────────────────────────────────────
+
+app.get('/api/auth/ok', (req, res) => {
+  const appId = process.env.OK_APP_ID;
+  const redirectUri = process.env.OK_REDIRECT_URI;
+  
+  if (!appId || !redirectUri) {
+    return res.status(500).json({ error: 'OK OAuth credentials not configured in .env' });
+  }
+
+  const okAuthUrl = `https://connect.ok.ru/oauth/authorize?client_id=${appId}&scope=VALUABLE_ACCESS;SET_STATUS;PHOTO_CONTENT&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  
+  res.redirect(okAuthUrl);
+});
+
+app.get('/api/auth/ok/callback', async (req, res) => {
+  const { code, error } = req.query;
+
+  if (error) {
+    return res.status(400).send(`OK Auth Error: ${error}`);
+  }
+
+  if (!code) {
+    return res.status(400).send('No code received from OK');
+  }
+
+  try {
+    // Обмениваем код на токен
+    const params = new URLSearchParams();
+    params.append('code', code);
+    params.append('client_id', process.env.OK_APP_ID);
+    params.append('client_secret', process.env.OK_SECRET_KEY);
+    params.append('redirect_uri', process.env.OK_REDIRECT_URI);
+    params.append('grant_type', 'authorization_code');
+
+    const tokenRes = await axios.post('https://api.ok.ru/oauth/token.do', params);
+    const { access_token } = tokenRes.data;
+
+    if (!access_token) {
+      return res.status(400).send('Failed to obtain access token from OK');
+    }
+
+    // В Одноклассниках для проверки токена и получения инфо нужно считать подпись sig
+    // Но для начала просто сохраним аккаунт. 
+    // Обычно при авторизации возвращается информация о пользователе или мы можем её запросить.
+    
+    const sessSecret = md5(access_token + process.env.OK_SECRET_KEY).toLowerCase();
+    const sigParams = {
+      application_key: process.env.OK_PUBLIC_KEY,
+      format: 'json',
+      method: 'users.getCurrentUser',
+    };
+    
+    const sorted = Object.keys(sigParams).sort().map(k => `${k}=${sigParams[k]}`).join('');
+    const sig = md5(sorted + sessSecret).toLowerCase();
+
+    const userRes = await axios.get('https://api.ok.ru/fb.do', {
+      params: {
+        ...sigParams,
+        access_token,
+        sig
+      }
+    });
+
+    const userData = userRes.data;
+    const name = userData.name || `${userData.first_name} ${userData.last_name}`;
+    const uid = userData.uid;
+
+    // Сохраняем или обновляем аккаунт в базе
+    let account = await Account.findOne({ platform: 'ok', ownerId: String(uid) });
+    
+    const accountData = {
+      platform: 'ok',
+      name,
+      ownerId: String(uid),
+      encryptedToken: encrypt(access_token),
+      okAppKey: process.env.OK_PUBLIC_KEY,
+      okAppSecretKey: encrypt(process.env.OK_SECRET_KEY),
+      isActive: true,
+      createdAt: new Date(),
+    };
+
+    if (account) {
+      Object.assign(account, accountData);
+      await account.save();
+    } else {
+      account = new Account(accountData);
+      await account.save();
+    }
+
+    // Перенаправляем пользователя обратно на фронтенд
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/accounts?success=ok_added`);
+  } catch (err) {
+    console.error('OK Callback Error:', err.response?.data || err.message);
+    res.status(500).send('Internal server error during OK authentication');
+  }
+});
+
 // Сохранить аккаунт (шифрует токен перед сохранением)
 app.post('/api/accounts', async (req, res) => {
   try {
     const { platform, name, token, ownerId, okAppKey, okAppSecretKey, okGroupId } = req.body;
-    if (!platform || !name || !token || !ownerId) {
+    
+    // Для OK ownerId может быть пустым (если это личный профиль, а не группа),
+    // поэтому делаем проверку ownerId зависимой от платформы.
+    const isOwnerIdRequired = platform !== 'ok';
+    
+    if (!platform || !name || !token || (isOwnerIdRequired && !ownerId)) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -159,9 +357,11 @@ app.post('/api/accounts', async (req, res) => {
       id: account._id, 
       platform, 
       name, 
-      ownerId, 
+      ownerId,
+      vkOwnerId: platform === 'vk' ? ownerId : undefined,
+      tgChatId: platform === 'telegram' ? ownerId : undefined,
+      okGroupId: platform === 'ok' ? okGroupId : undefined,
       okAppKey, 
-      okGroupId,
       isActive: account.isActive,
       createdAt: account.createdAt
     });
@@ -377,8 +577,9 @@ app.post('/api/publish/ok', async (req, res) => {
       const account = await Account.findById(accountId);
       if (account) {
         token = decrypt(account.encryptedToken);
-        // В нашей текущей схеме нет appKey/secretKey для OK, 
-        // предположим они передаются или тоже хранятся (нужно расширить схему если планируем хранить)
+        appKey = account.okAppKey;
+        secretKey = account.okAppSecretKey ? decrypt(account.okAppSecretKey) : undefined;
+        groupId = account.okGroupId;
       }
     }
 
