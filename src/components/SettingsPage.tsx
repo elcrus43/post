@@ -1,4 +1,4 @@
-import { ExternalLink, Info, Shield } from 'lucide-react';
+import { ExternalLink, Info, Shield, Trash2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
@@ -6,6 +6,13 @@ import toast from 'react-hot-toast';
 export default function SettingsPage() {
   const { backendUrl, useBackend, setBackendConfig } = useStore();
   const [urlInput, setUrlInput] = useState(backendUrl || '');
+
+  const handleClearCache = () => {
+    if (confirm('Это удалит временные данные из браузера и перезагрузит страницу. Аккаунты на сервере не пострадают. Продолжить?')) {
+      localStorage.removeItem('autopost-storage');
+      window.location.reload();
+    }
+  };
 
   const handleSaveBackend = () => {
     try {
@@ -215,6 +222,31 @@ export default function SettingsPage() {
             <div>{'app.listen(3001);'}</div>
           </div>
         </Section>
+
+        {/* Troubleshooting */}
+        <Section color="red" title="Устранение неполадок" emoji="🛠️">
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl border border-red-100">
+              <Info size={16} className="text-red-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-red-900">Ошибка QuotaExceededError?</p>
+                <p className="text-xs text-red-600 mt-1">
+                  Это происходит, когда память браузера переполнена тяжелыми картинками. 
+                  Нажмите кнопку ниже, чтобы очистить локальный кэш. Все ваши данные (аккаунты, правила) 
+                  сохранятся в базе данных на сервере и будут загружены заново после перезагрузки.
+                </p>
+              </div>
+            </div>
+            
+            <button
+              onClick={handleClearCache}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-red-200 text-red-600 text-sm font-semibold rounded-2xl hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
+            >
+              <Trash2 size={16} />
+              Очистить локальный кэш и перезагрузить
+            </button>
+          </div>
+        </Section>
       </div>
     </div>
   );
@@ -237,6 +269,7 @@ function Section({
     orange: 'border-orange-200',
     violet: 'border-violet-200',
     gray: 'border-gray-200',
+    red: 'border-red-200',
   };
   const headers: Record<string, string> = {
     sky: 'bg-sky-50',
@@ -244,6 +277,7 @@ function Section({
     orange: 'bg-orange-50',
     violet: 'bg-violet-50',
     gray: 'bg-gray-50',
+    red: 'bg-red-50',
   };
 
   return (

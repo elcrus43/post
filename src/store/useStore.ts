@@ -396,6 +396,11 @@ export const useStore = create<AppStore>()(
     { 
       name: 'autopost-storage',
       version: 2,
+      partialize: (state) => {
+        // Исключаем тяжелые данные из localStorage, так как они есть на бэкенде
+        const { posts, repostHistory, analyticsEntries, ...rest } = state;
+        return rest;
+      },
       migrate: (persistedState: any, version: number) => {
         if (version < 2 && persistedState) {
           const oldUrl = 'https://post-production-01fa.up.railway.app';
