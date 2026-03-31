@@ -717,38 +717,13 @@ app.patch('/api/accounts/:id/toggle', async (req, res) => {
 // Публикация во ВКонтакте
 app.post('/api/publish/vk', async (req, res) => {
   try {
-    const { accountId, token: directToken, ownerId: directOwnerId, message, attachments } = req.body;
-    
-    let token = directToken;
-    let ownerId = directOwnerId;
-
-    if (accountId) {
-      const account = await Account.findById(accountId);
-      if (account) {
-        token = decrypt(account.encryptedToken);
-        ownerId = account.ownerId;
-      }
-    }
-
-    if (!token || !ownerId) {
-      return res.status(400).json({ error: 'Missing token or ownerId' });
-    }
-
-    const response = await axios.post('https://api.vk.ru/method/wall.post', null, {
-      params: {
-        owner_id: ownerId,
-        message,
-        attachments: attachments || '',
-        access_token: token,
-        v: '5.199',
-      }
-    });
-
-    if (response.data.error) {
-      return res.status(400).json(response.data.error);
-    }
-    res.json(response.data.response);
+    const { accountId, token, ownerId, message, attachments, media } = req.body;
+    // Используем media если есть, иначе attachments (для обратной совместимости)
+    const postMedia = media || (attachments ? attachments.split(',').map(url => ({ type: 'image', url })) : []);
+    const result = await performPublish(accountId || { platform: 'vk', token, ownerId }, { text: message, media: postMedia });
+    res.json(result);
   } catch (err) {
+    console.error('Manual VK publish error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -837,31 +812,11 @@ app.post('/api/publish/vk/story', async (req, res) => {
 // Публикация в Telegram
 app.post('/api/publish/telegram', async (req, res) => {
   try {
-    const { accountId, token: directToken, ownerId: directOwnerId, text, parse_mode = 'HTML' } = req.body;
-    
-    let token = directToken;
-    let ownerId = directOwnerId;
-
-    if (accountId) {
-      const account = await Account.findById(accountId);
-      if (account) {
-        token = decrypt(account.encryptedToken);
-        ownerId = account.ownerId;
-      }
-    }
-
-    if (!token || !ownerId) {
-      return res.status(400).json({ error: 'Missing token or chatId' });
-    }
-
-    const response = await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-      chat_id: ownerId,
-      text,
-      parse_mode
-    });
-
-    res.json(response.data);
+    const { accountId, token, ownerId, text, media } = req.body;
+    const result = await performPublish(accountId || { platform: 'telegram', token, ownerId }, { text, media });
+    res.json(result);
   } catch (err) {
+    console.error('Manual TG publish error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -878,72 +833,11 @@ function okSign(params, secretKey) {
 
 app.post('/api/publish/ok', async (req, res) => {
   try {
-    const { 
-      accountId, 
-      token: directToken, 
-      appKey: directAppKey, 
-      secretKey: directSecretKey,
-      groupId: directGroupId,
-      message, 
-      attachments 
-    } = req.body;
-
-    let token = directToken;
-    let appKey = directAppKey;
-    let secretKey = directSecretKey;
-    let groupId = directGroupId;
-
-    if (accountId) {
-      const account = await Account.findById(accountId);
-      if (account) {
-        token = decrypt(account.encryptedToken);
-        appKey = account.okAppKey;
-        secretKey = account.okAppSecretKey ? decrypt(account.okAppSecretKey) : undefined;
-        groupId = account.okGroupId;
-      }
-    }
-
-    if (!token || !appKey || !secretKey) {
-      return res.status(400).json({ error: 'Missing OK credentials (token, appKey, or secretKey)' });
-    }
-
-    const sessionSecretKey = md5(token + secretKey).toLowerCase();
-    
-    // Подготовим аттачмент как в apiService.ts
-    const attachmentObj = {
-      media: [{ type: 'text', text: message }]
-    };
-    // Если есть картинки, добавить их (упрощенно)
-    if (attachments) {
-      attachments.split(',').forEach(url => {
-        attachmentObj.media.push({ type: 'photo', url });
-      });
-    }
-
-    const params = {
-      application_key: appKey,
-      attachment: JSON.stringify(attachmentObj),
-      format: 'json',
-      method: 'mediatopic.post',
-      type: 'GROUP_THEME',
-      ...(groupId ? { gid: groupId } : {}),
-    };
-
-    const sig = okSign(params, sessionSecretKey);
-
-    const response = await axios.get('https://api.ok.ru/fb.do', {
-      params: {
-        ...params,
-        sig,
-        access_token: token,
-      }
-    });
-
-    if (response.data.error_code) {
-      return res.status(400).json(response.data);
-    }
-    res.json(response.data);
+    const { accountId, token, appKey, secretKey, groupId, message, media } = req.body;
+    const result = await performPublish(accountId || { platform: 'ok', token, okAppKey: appKey, okAppSecretKey: secretKey, okGroupId: groupId }, { text: message, media });
+    res.json(result);
   } catch (err) {
+    console.error('Manual OK publish error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -997,13 +891,18 @@ app.post('/api/ai/proxy', async (req, res) => {
 });
 
 // Вспомогательная функция для публикации на любую платформу
-async function performPublish(accountId, content) {
-  const account = await Account.findById(accountId);
-  if (!account || !account.isActive) {
-    throw new Error(`Account ${accountId} not found or inactive`);
+async function performPublish(accountIdOrData, content) {
+  let account;
+  if (typeof accountIdOrData === 'string' || mongoose.isValidObjectId(accountIdOrData)) {
+    account = await Account.findById(accountIdOrData);
+    if (!account || !account.isActive) {
+      throw new Error(`Account ${accountIdOrData} not found or inactive`);
+    }
+  } else {
+    account = accountIdOrData; // Мы уже передали объект
   }
 
-  const token = decrypt(account.encryptedToken);
+  const token = account.encryptedToken ? decrypt(account.encryptedToken) : account.token;
   const { platform, ownerId } = account;
   const media = content.media || [];
   const text = content.text || '';

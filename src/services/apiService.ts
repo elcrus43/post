@@ -318,13 +318,12 @@ export async function publishToAccount(account: Account, post: Post): Promise<Po
           // Или просто будем считать, что прокси пока только для VK/TG с переданными токенами
           
           // Передадим аккаунт целиком или необходимые поля
-          accountId: account.id, // Это локальный ID, server.js его не знает если не сохраняли
+          accountId: account.id,
           message: post.text,
           text: post.text, // для TG
-          attachments: post.media.map(m => m.url).join(','), // для VK
+          media: post.media, // ВАЖНО: передаем массив для обработки на бэкенде
+          attachments: post.media.map(m => m.url).join(','), // для обратной совместимости
           
-          // Добавим токены в запрос для прокси (если сервер позволяет)
-          // Но лучше доработать server.js чтобы он принимал токены если нет accountId
           token: account.platform === 'vk' ? account.vkToken : 
                  account.platform === 'ok' ? account.okToken : 
                  account.tgBotToken,
@@ -332,7 +331,6 @@ export async function publishToAccount(account: Account, post: Post): Promise<Po
                    account.platform === 'ok' ? account.okGroupId : 
                    account.tgChatId,
           
-          // Для OK дополнительные поля
           appKey: account.okAppKey,
           secretKey: account.okAppSecretKey,
           groupId: account.okGroupId,
