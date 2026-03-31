@@ -904,10 +904,18 @@ async function performPublish(accountIdOrData, content) {
 
   const token = account.encryptedToken ? decrypt(account.encryptedToken) : account.token;
   const { platform, ownerId } = account;
-  const media = content.media || [];
-  const text = content.text || '';
+  const text = content.text || content.message || '';
+  
+  // Совместимость: если передан attachments (строка), превращаем в массив media
+  let media = content.media || [];
+  if (media.length === 0 && content.attachments) {
+    media = content.attachments.split(',').filter(Boolean).map(url => ({
+      url: url.trim(),
+      type: url.match(/\.(mp4|mov|avi|wmv)$/i) ? 'video' : 'image'
+    }));
+  }
 
-  console.log(`🚀 Publishing to ${platform} (${ownerId}) | Media count: ${media.length}`);
+  console.log(`[performPublish] Platform: ${platform}, Media Items: ${media.length}, Text length: ${text.length}`);
 
   if (platform === 'vk') {
     // ВКонтакте принимает attachments как строку через запятую ссылок или медиа-ID
@@ -930,11 +938,18 @@ async function performPublish(accountIdOrData, content) {
     
     // Вспомогательная функция для подготовки медиа для Telegram
     const getTgFile = (mediaData) => {
+      if (!mediaData || !mediaData.url) return null;
+      
       // Если это base64 (часто с префиксом data:image/png;base64,...)
-      if (mediaData.url.startsWith('data:')) {
-        const matches = mediaData.url.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          return Buffer.from(matches[2], 'base64');
+      if (typeof mediaData.url === 'string' && mediaData.url.startsWith('data:')) {
+        try {
+          const base64Index = mediaData.url.indexOf(';base64,');
+          if (base64Index !== -1) {
+            const base64Data = mediaData.url.slice(base64Index + 8);
+            return Buffer.from(base64Data, 'base64');
+          }
+        } catch (e) {
+          console.error('Error parsing base64 media:', e.message);
         }
       }
       // Если это обычный URL
@@ -1238,7 +1253,7 @@ async function checkScheduledPosts() {
       try {
         const res = await performPublish(accId, {
           text: post.text,
-          attachments: post.media.map(m => m.url).join(',')
+          media: post.media
         });
         results.push({ accountId: accId, ...res, publishedAt: new Date() });
       } catch (err) {
@@ -1281,10 +1296,22 @@ async function processRSSRule(rule) {
     if (rule.addSourceLink) postText += `\n\n🔗 ${latestItem.link}`;
     if (rule.appendText) postText += `\n\n${rule.appendText}`;
 
+    // Пытаемся найти картинку в RSS
+    const media = [];
+    if (latestItem.enclosure && latestItem.enclosure.url) {
+      media.push({ url: latestItem.enclosure.url, type: 'image' });
+    } else if (latestItem.media && latestItem.media.$ && latestItem.media.$.url) {
+      media.push({ url: latestItem.media.$.url, type: 'image' });
+    } else {
+      // Поиск первого тега <img> в контенте
+      const imgMatch = (latestItem.content || '').match(/<img[^>]+src="([^">]+)"/);
+      if (imgMatch) media.push({ url: imgMatch[1], type: 'image' });
+    }
+
     const results = [];
     for (const accId of rule.targetAccountIds) {
       try {
-        const res = await performPublish(accId, { text: postText });
+        const res = await performPublish(accId, { text: postText, media });
         results.push({ accountId: accId, ...res });
       } catch (err) {
         results.push({ accountId: accId, status: 'error', error: err.message });
@@ -1363,21 +1390,20 @@ async function processVKWallRule(rule) {
     let postText = latestItem.text || '';
     if (rule.filters.minLength && postText.length < rule.filters.minLength) return;
 
-    const attachments = (latestItem.attachments || [])
+    const vkMedia = (latestItem.attachments || [])
       .filter(a => a.type === 'photo')
       .map(a => {
         const sizes = a.photo.sizes;
-        return sizes[sizes.length - 1].url; // самая большая версия
-      })
-      .join(',');
-
-    if (rule.addSourceLink) postText += `\n\n🔗 https://vk.com/wall${ownerId}_${latestItem.id}`;
-    if (rule.appendText) postText += `\n\n${rule.appendText}`;
+        return {
+          url: sizes[sizes.length - 1].url,
+          type: 'image'
+        };
+      });
 
     const results = [];
     for (const accId of rule.targetAccountIds) {
       try {
-        const res = await performPublish(accId, { text: postText, attachments });
+        const res = await performPublish(accId, { text: postText, media: vkMedia });
         results.push({ accountId: accId, ...res });
       } catch (err) {
         results.push({ accountId: accId, status: 'error', error: err.message });
