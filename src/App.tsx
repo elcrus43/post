@@ -17,16 +17,16 @@ import ReposterPage from './components/ReposterPage';
 import AnalyticsPage from './components/AnalyticsPage';
 
 export default function App() {
-  const { activeTab, isAuthorized, syncAccounts } = useStore();
-  useScheduler();      // ⏰ Автоматический планировщик публикаций
-  useReposter();       // 🔄 Автоматический репостер
+  const { activeTab, isAuthorized, syncData } = useStore();
+  useScheduler();      // ⏰ Синхронизация планировщика
+  useReposter();       // 🔄 Синхронизация репостера
   useNotifications();  // 🔔 Push-уведомления + авто-удаление
 
   useEffect(() => {
     if (isAuthorized) {
-      syncAccounts();
+      syncData();
     }
-  }, [isAuthorized, syncAccounts]);
+  }, [isAuthorized, syncData]);
 
   if (!isAuthorized) {
     return (

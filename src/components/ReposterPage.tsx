@@ -235,7 +235,7 @@ function RuleForm({
               {form.source.type === 'vk_wall' && (
                 <>
                   <div>
-                    <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Owner ID (с минусом для групп)</label>
+                    <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Owner ID (ID сообщества с минусом)</label>
                     <input
                       className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
                       placeholder="-123456789"
@@ -245,13 +245,38 @@ function RuleForm({
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-gray-600 mb-1.5 block">VK Access Token</label>
+                    
+                    {/* Выбор из существующих аккаунтов */}
+                    {accounts.filter(a => a.platform === 'vk').length > 0 && (
+                      <select 
+                        className="w-full border border-gray-200 rounded-xl px-4 py-2 mb-2 text-sm bg-violet-50 text-violet-700"
+                        onChange={(e) => {
+                          const acc = accounts.find(a => a.id === e.target.value);
+                          if (acc) {
+                            // Токен на фронтенде обычно не хранится (он в БД), 
+                            // Но мы можем пометить, что нужно использовать токен этого аккаунта
+                            // Или, если OAuth вернул токен в стейт, взять его.
+                            // В нашей текущей схеме мы можем просто оставить поле пустым на бэкенде, 
+                            // и бэкенд сам найдет активный аккаунт, если токен не указан.
+                            upd('source.vkToken', ''); // Оставляем пустым для авто-выбора на бэкенде
+                          }
+                        }}
+                      >
+                        <option value="">-- Использовать любой активный аккаунт --</option>
+                        {accounts.filter(a => a.platform === 'vk').map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                    )}
+
                     <input
                       type="password"
                       className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                      placeholder="vk1.a...."
+                      placeholder="Или вставьте токен вручную (vk1.a....)"
                       value={form.source.vkToken || ''}
                       onChange={(e) => upd('source.vkToken', e.target.value)}
                     />
+                    <p className="text-xs text-gray-400 mt-1">Оставьте пустым, чтобы использовать первый активный VK-аккаунт.</p>
                   </div>
                 </>
               )}

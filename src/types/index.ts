@@ -1,4 +1,4 @@
-export type Platform = 'vk' | 'ok' | 'telegram';
+export type Platform = 'vk' | 'ok' | 'telegram' | 'tenchat' | 'twitter';
 export type AccountType = 'personal' | 'group' | 'channel';
 export type PostStatus = 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed';
 

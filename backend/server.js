@@ -10,6 +10,9 @@ const FormData = require('form-data');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
+const cron = require('node-cron');
+const Parser = require('rss-parser');
+const parser = new Parser();
 
 const app = express();
 app.use(cookieParser());
@@ -54,6 +57,75 @@ const AccountSchema = new mongoose.Schema({
 });
 const Account = mongoose.model('Account', AccountSchema);
 
+// Схема запланированного поста
+const PostSchema = new mongoose.Schema({
+  userId: String, // для будущего многопользовательского режима
+  text: String,
+  media: Array, // [{type, url, name}]
+  scheduledAt: Date,
+  status: { type: String, enum: ['scheduled', 'published', 'error', 'draft'], default: 'scheduled' },
+  targetAccounts: [String],
+  results: [
+    {
+      accountId: String,
+      platform: String,
+      status: String,
+      postUrl: String,
+      error: String,
+      publishedAt: Date,
+    }
+  ],
+  createdAt: { type: Date, default: Date.now }
+});
+const Post = mongoose.model('Post', PostSchema);
+
+// Схема правила репостера
+const RepostRuleSchema = new mongoose.Schema({
+  name: String,
+  status: { type: String, enum: ['active', 'paused', 'error'], default: 'paused' },
+  source: {
+    type: { type: String, enum: ['rss', 'vk_wall', 'tg_channel'] },
+    name: String,
+    url: String,
+    vkOwnerId: String,
+    vkToken: String,
+    tgUsername: String,
+  },
+  targetAccountIds: [String],
+  schedule: {
+    days: [Number], // 0-6
+    hours: [Number], // 0-23
+    intervalMin: Number,
+    intervalMax: Number,
+  },
+  filters: {
+    minLength: Number,
+    maxLength: Number,
+    requireImage: Boolean,
+    stopWords: [String],
+    requiredWords: [String],
+  },
+  order: { type: String, enum: ['newest', 'oldest', 'random'], default: 'newest' },
+  appendText: String,
+  addSourceLink: Boolean,
+  skipDuplicates: Boolean,
+  lastCheckedAt: Date,
+  nextPublishAt: Date,
+  createdAt: { type: Date, default: Date.now }
+});
+const RepostRule = mongoose.model('RepostRule', RepostRuleSchema);
+
+// Схема истории репостов (для предотвращения дублей и аналитики)
+const RepostHistorySchema = new mongoose.Schema({
+  ruleId: mongoose.Schema.Types.ObjectId,
+  sourceUrl: { type: String, unique: true }, // уникальный ID поста из источника (guid или link)
+  publishedAt: { type: Date, default: Date.now },
+  status: String,
+  text: String,
+  results: Array,
+});
+const RepostHistory = mongoose.model('RepostHistory', RepostHistorySchema);
+
 // Шифрование токена (AES-256)
 const encrypt = (token) => {
   if (!token) return '';
@@ -67,10 +139,19 @@ const decrypt = (encrypted) => {
   return bytes.toString(CryptoJS.enc.Utf8);
 };
 
+// Схема для временного хранения состояния OAuth (PKCE)
+const OAuthStateSchema = new mongoose.Schema({
+  state: String,
+  codeVerifier: String,
+  platform: String,
+  createdAt: { type: Date, expires: '15m', default: Date.now }, // Авто-удаление через 15 минут
+});
+const OAuthState = mongoose.model('OAuthState', OAuthStateSchema);
+
 // Middleware для защиты доступа (только для ПОЛЬЗОВАТЕЛЯ)
 const authMiddleware = (req, res, next) => {
   const token = req.cookies.app_token;
-  const publicPaths = ['/api/login', '/login', '/favicon.ico'];
+  const publicPaths = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter'];
   
   // Если это публичный путь, разрешаем
   if (publicPaths.some(p => req.path.startsWith(p))) {
@@ -148,14 +229,20 @@ app.get('/api/accounts', async (req, res) => {
 
 app.get('/api/auth/vk', (req, res) => {
   const clientId = process.env.VK_CLIENT_ID;
+  const clientSecret = process.env.VK_CLIENT_SECRET;
   const redirectUri = process.env.VK_REDIRECT_URI;
   
-  if (!clientId || !redirectUri) {
-    return res.status(500).json({ error: 'VK OAuth credentials not configured in .env' });
+  if (!clientId || !clientSecret || !redirectUri) {
+    const missing = [];
+    if (!clientId) missing.push('VK_CLIENT_ID');
+    if (!clientSecret) missing.push('VK_CLIENT_SECRET');
+    if (!redirectUri) missing.push('VK_REDIRECT_URI');
+    return res.status(500).json({ error: `VK OAuth not configured. Missing in .env: ${missing.join(', ')}` });
   }
 
-  // Запрашиваем права на стену, группы, истории и бессрочный токен (offline)
-  const vkAuthUrl = `https://oauth.vk.com/authorize?client_id=${clientId}&display=page&redirect_uri=${encodeURIComponent(redirectUri)}&scope=wall,groups,stories,offline&response_type=code&v=5.199`;
+  // VK ID Authorization (Modern way)
+  // 466972 = wall+groups+photos+video+audio+docs+offline
+  const vkAuthUrl = `https://id.vk.com/auth?app_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=466972&state=${Math.random().toString(36).substring(7)}`;
   
   res.redirect(vkAuthUrl);
 });
@@ -234,13 +321,20 @@ app.get('/api/auth/vk/callback', async (req, res) => {
 
 app.get('/api/auth/ok', (req, res) => {
   const appId = process.env.OK_APP_ID;
+  const secretKey = process.env.OK_SECRET_KEY;
+  const publicKey = process.env.OK_PUBLIC_KEY;
   const redirectUri = process.env.OK_REDIRECT_URI;
   
-  if (!appId || !redirectUri) {
-    return res.status(500).json({ error: 'OK OAuth credentials not configured in .env' });
+  if (!appId || !secretKey || !publicKey || !redirectUri) {
+    const missing = [];
+    if (!appId) missing.push('OK_APP_ID');
+    if (!secretKey) missing.push('OK_SECRET_KEY');
+    if (!publicKey) missing.push('OK_PUBLIC_KEY');
+    if (!redirectUri) missing.push('OK_REDIRECT_URI');
+    return res.status(500).json({ error: `OK OAuth not configured. Missing in .env: ${missing.join(', ')}` });
   }
 
-  const okAuthUrl = `https://connect.ok.ru/oauth/authorize?client_id=${appId}&scope=VALUABLE_ACCESS;SET_STATUS;PHOTO_CONTENT&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const okAuthUrl = `https://connect.ok.ru/oauth/authorize?client_id=${appId}&scope=VALUABLE_ACCESS;PUBLISH_TO_STREAM;GROUP_CONTENT;PHOTO_CONTENT;VIDEO_CONTENT;LONG_ACCESS_TOKEN;GET_EMAIL;PUBLISH_NOTE&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`;
   
   res.redirect(okAuthUrl);
 });
@@ -326,6 +420,188 @@ app.get('/api/auth/ok/callback', async (req, res) => {
   } catch (err) {
     console.error('OK Callback Error:', err.response?.data || err.message);
     res.status(500).send('Internal server error during OK authentication');
+  }
+});
+
+// ─── TenChat OAuth 2.0 (Prototype) ───────────────────────────────────────────
+
+app.get('/api/auth/tenchat', (req, res) => {
+  const clientId = process.env.TENCHAT_CLIENT_ID || 'smm-planner'; // Default from user snippet if not set
+  const redirectUri = process.env.TENCHAT_REDIRECT_URI;
+  
+  if (!redirectUri) {
+    return res.status(500).json({ error: 'TenChat REDIRECT_URI not configured in .env' });
+  }
+
+  const tenchatAuthUrl = `https://oauth.tenchat.ru/auth/sign-in?client_id=${clientId}&response_type=code&scope=post:write+user:read&redirect_uri=${encodeURIComponent(redirectUri)}&state=${Math.random().toString(36).substring(7)}`;
+  
+  res.redirect(tenchatAuthUrl);
+});
+
+app.get('/api/auth/tenchat/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  if (error) return res.status(400).send(`TenChat Auth Error: ${error}`);
+  if (!code) return res.status(400).send('No code received from TenChat');
+
+  try {
+    // Обмен кода на токен (OAuth 2.0 PKCE)
+    const tokenData = {
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: process.env.TENCHAT_REDIRECT_URI,
+      client_id: process.env.TENCHAT_CLIENT_ID
+    };
+
+    if (process.env.TENCHAT_CLIENT_SECRET) {
+      tokenData.client_secret = process.env.TENCHAT_CLIENT_SECRET;
+    }
+
+    const tokenRes = await axios.post('https://api.tenchat.ru/oauth/token', tokenData);
+
+    const { access_token, user_id } = tokenRes.data;
+
+    // Получаем инфо о пользователе
+    const userRes = await axios.get('https://api.tenchat.ru/v1/user/me', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const name = userRes.data.name || userRes.data.username || 'TenChat User';
+
+    let account = await Account.findOne({ platform: 'tenchat', ownerId: String(user_id) });
+    const accountData = {
+      platform: 'tenchat',
+      name,
+      ownerId: String(user_id),
+      encryptedToken: encrypt(access_token),
+      isActive: true,
+      createdAt: new Date(),
+    };
+
+    if (account) {
+      Object.assign(account, accountData);
+      await account.save();
+    } else {
+      account = new Account(accountData);
+      await account.save();
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/accounts?success=tenchat_added`);
+  } catch (err) {
+    console.error('TenChat Callback Error:', err.response?.data || err.message);
+    res.status(500).send('Internal server error during TenChat authentication');
+  }
+});
+
+// ─── Twitter (X) OAuth 2.0 + PKCE ────────────────────────────────────────────
+
+const crypto = require('crypto');
+
+function generateCodeVerifier() {
+  return crypto.randomBytes(32).toString('hex'); // 64 chars
+}
+
+function generateCodeChallenge(verifier) {
+  const hash = crypto.createHash('sha256').update(verifier).digest();
+  return hash.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+app.get('/api/auth/twitter', async (req, res) => {
+  const clientId = process.env.TWITTER_CLIENT_ID;
+  const redirectUri = process.env.TWITTER_REDIRECT_URI;
+
+  if (!clientId || !redirectUri) {
+    return res.status(500).json({ error: 'Twitter OAuh 2.0 credentials not configured' });
+  }
+
+  const state = Math.random().toString(36).substring(7);
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+
+  // Сохраняем verifier в БД для проверки в callback
+  await OAuthState.create({ state, codeVerifier, platform: 'twitter' });
+
+  const scope = 'tweet.read tweet.write users.read offline.access media.write';
+  const twitterAuthUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
+  
+  res.redirect(twitterAuthUrl);
+});
+
+app.get('/api/auth/twitter/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const clientId = process.env.TWITTER_CLIENT_ID;
+  const clientSecret = process.env.TWITTER_CLIENT_SECRET;
+  const redirectUri = process.env.TWITTER_REDIRECT_URI;
+
+  if (error) return res.status(400).send(`Twitter Auth Error: ${error}`);
+  if (!code) return res.status(400).send('No code received from Twitter');
+
+  try {
+    const savedState = await OAuthState.findOneAndDelete({ state, platform: 'twitter' });
+    if (!savedState) return res.status(400).send('Invalid or expired OAuth state');
+
+    // Обмен кода на токен (OAuth 2.0 PKCE)
+    const params = new URLSearchParams({
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+      code_verifier: savedState.codeVerifier,
+      client_id: clientId, // Обязательно для PKCE
+    });
+
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+
+    // Если есть секрет — используем Basic Auth, если нет — только client_id в теле
+    if (clientSecret) {
+      const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      headers['Authorization'] = `Basic ${authHeader}`;
+    }
+    
+    const tokenRes = await axios.post('https://api.twitter.com/2/oauth2/token', 
+      params,
+      { headers }
+    );
+
+    const { access_token, refresh_token, expires_in } = tokenRes.data;
+
+    // Получаем инфо о пользователе
+    const userRes = await axios.get('https://api.twitter.com/2/users/me', {
+      headers: { Authorization: `Bearer ${access_token}` },
+      params: { 'user.fields': 'id,name,username' }
+    });
+
+    const userData = userRes.data.data;
+    const name = `@${userData.username} (${userData.name})`;
+
+    let account = await Account.findOne({ platform: 'twitter', ownerId: userData.id });
+    const accountData = {
+      platform: 'twitter',
+      name,
+      ownerId: userData.id,
+      encryptedToken: encrypt(access_token), // Refresh token also needs storage for production
+      isActive: true,
+      createdAt: new Date(),
+    };
+
+    if (account) {
+      Object.assign(account, accountData);
+      await account.save();
+    } else {
+      account = new Account(accountData);
+      await account.save();
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/accounts?success=twitter_added`);
+  } catch (err) {
+    console.error('Twitter Callback Error:', err.response?.data || err.message);
+    res.status(500).send('Internal server error during Twitter authentication');
   }
 });
 
@@ -673,6 +949,425 @@ app.post('/api/ai/proxy', async (req, res) => {
       status: status,
       details: err.message
     });
+  }
+});
+
+// Вспомогательная функция для публикации на любую платформу
+async function performPublish(accountId, content) {
+  const account = await Account.findById(accountId);
+  if (!account || !account.isActive) {
+    throw new Error(`Account ${accountId} not found or inactive`);
+  }
+
+  const token = decrypt(account.encryptedToken);
+  const { platform, ownerId } = account;
+
+  if (platform === 'vk') {
+    const response = await axios.post('https://api.vk.ru/method/wall.post', null, {
+      params: {
+        owner_id: ownerId,
+        message: content.text,
+        attachments: content.attachments || '',
+        access_token: token,
+        v: '5.199',
+      }
+    });
+    if (response.data.error) throw new Error(response.data.error.error_msg);
+    return { platform: 'vk', status: 'success', postUrl: `https://vk.com/wall${ownerId}_${response.data.response.post_id}` };
+  } 
+  
+  if (platform === 'telegram') {
+    const response = await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: ownerId,
+      text: content.text,
+      parse_mode: 'HTML'
+    });
+    return { platform: 'telegram', status: 'success', postUrl: `https://t.me/${ownerId}` }; // Ссылка на чат/канал
+  }
+
+  if (platform === 'tenchat') {
+    const response = await axios.post('https://api.tenchat.ru/v1/posts', {
+      text: content.text,
+      attachments: content.attachments ? content.attachments.split(',') : []
+    }, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return { platform: 'tenchat', status: 'success', postId: response.data.id, postUrl: `https://tenchat.ru/post/${response.data.id}` };
+  }
+
+  if (platform === 'ok') {
+    const appKey = account.okAppKey;
+    const secretKey = decrypt(account.okAppSecretKey);
+    const sessionSecretKey = md5(token + secretKey).toLowerCase();
+    
+    const attachmentObj = {
+      media: [{ type: 'text', text: content.text }]
+    };
+    if (content.attachments) {
+      content.attachments.split(',').forEach(url => {
+        attachmentObj.media.push({ type: 'photo', url });
+      });
+    }
+
+    const params = {
+      application_key: appKey,
+      attachment: JSON.stringify(attachmentObj),
+      format: 'json',
+      method: 'mediatopic.post',
+      type: 'GROUP_THEME',
+      ...(account.okGroupId ? { gid: account.okGroupId } : {}),
+    };
+
+    const sig = okSign(params, sessionSecretKey);
+    const response = await axios.get('https://api.ok.ru/fb.do', {
+      params: { ...params, sig, access_token: token }
+    });
+
+    if (response.data.error_code) throw new Error(response.data.error_msg);
+    return { platform: 'ok', status: 'success', postUrl: `https://ok.ru/group/${account.okGroupId || 'profile'}` };
+  }
+
+  throw new Error(`Unsupported platform: ${platform}`);
+}
+
+// ─── API Эндпоинты для Планировщика (Posts) ───────────────────────────────────
+
+app.get('/api/posts', async (req, res) => {
+  try {
+    const posts = await Post.find().sort({ scheduledAt: 1 });
+    res.json(posts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/posts', async (req, res) => {
+  try {
+    const post = new Post(req.body);
+    await post.save();
+    res.json(post);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/posts/:id', async (req, res) => {
+  try {
+    const post = await Post.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(post);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/posts/:id', async (req, res) => {
+  try {
+    await Post.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── API Эндпоинты для Репостера (Rules) ──────────────────────────────────────
+
+app.get('/api/reposter/rules', async (req, res) => {
+  try {
+    const rules = await RepostRule.find().sort({ createdAt: -1 });
+    res.json(rules);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reposter/rules', async (req, res) => {
+  try {
+    const rule = new RepostRule(req.body);
+    await rule.save();
+    res.json(rule);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/reposter/rules/:id', async (req, res) => {
+  try {
+    const rule = await RepostRule.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(rule);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/reposter/rules/:id', async (req, res) => {
+  try {
+    await RepostRule.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reposter/history', async (req, res) => {
+  try {
+    const history = await RepostHistory.find().sort({ publishedAt: -1 }).limit(100);
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/reposter/history', async (req, res) => {
+  try {
+    await RepostHistory.deleteMany({});
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Фоновые задачи (Worker) ──────────────────────────────────────────────────
+// Функция публикации в Twitter (X) API
+async function performPublishTwitter(account, post) {
+  const token = decrypt(account.encryptedToken);
+  
+  // Twitter API v2 Tweet endpoint (POST /2/tweets)
+  const response = await axios.post('https://api.twitter.com/2/tweets', {
+    text: post.text
+    // Для медиа в v2 нужно сначала загрузить в v1.1 Media Upload и получить media_id
+  }, {
+    headers: { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  return {
+    status: 'success',
+    postId: response.data.data.id,
+    postUrl: `https://twitter.com/user/status/${response.data.data.id}`
+  };
+}
+
+// Функция для проверки запланированных постов
+async function checkScheduledPosts() {
+  const now = new Date();
+  console.log(`🕒 [Worker] Checking scheduler at ${now.toISOString()}...`);
+  const pendingPosts = await Post.find({
+    status: 'scheduled',
+    scheduledAt: { $lte: now }
+  });
+
+  if (pendingPosts.length === 0) {
+    console.log(`🕒 [Worker] No pending posts found.`);
+    return;
+  }
+
+  for (const post of pendingPosts) {
+    const results = [];
+    for (const accId of post.targetAccounts) {
+      try {
+        const res = await performPublish(accId, {
+          text: post.text,
+          attachments: post.media.map(m => m.url).join(',')
+        });
+        results.push({ accountId: accId, ...res, publishedAt: new Date() });
+      } catch (err) {
+        console.error(`❌ Failed to publish post ${post._id} to ${accId}:`, err.message);
+        results.push({ accountId: accId, status: 'error', error: err.message, publishedAt: new Date() });
+      }
+    }
+
+    post.status = results.every(r => r.status === 'error') ? 'error' : 'published';
+    post.results = results;
+    await post.save();
+  }
+}
+
+// Функция для обработки одного правила репостера (RSS)
+async function processRSSRule(rule) {
+  console.log(`🔄 [Worker] Processing RSS rule: ${rule.name} (${rule.source.url})...`);
+  try {
+    const feed = await parser.parseURL(rule.source.url);
+    const items = feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+    
+    // Берем только последний элемент для простоты (или несколько, если не было проверок)
+    const latestItem = items[0];
+    if (!latestItem) return;
+
+    const sourceUid = latestItem.guid || latestItem.link;
+    
+    // Проверяем, не публиковали ли мы это уже
+    const alreadyDone = await RepostHistory.findOne({ sourceUrl: sourceUid });
+    if (alreadyDone && rule.skipDuplicates) return;
+
+    console.log(`🔄 Reposter: found new item in ${rule.name} -> ${latestItem.title}`);
+
+    // Фильтры
+    const text = latestItem.contentSnippet || latestItem.content || '';
+    if (rule.filters.minLength && text.length < rule.filters.minLength) return;
+    
+    // Формируем текст поста
+    let postText = `${latestItem.title}\n\n${text}`;
+    if (rule.addSourceLink) postText += `\n\n🔗 ${latestItem.link}`;
+    if (rule.appendText) postText += `\n\n${rule.appendText}`;
+
+    const results = [];
+    for (const accId of rule.targetAccountIds) {
+      try {
+        const res = await performPublish(accId, { text: postText });
+        results.push({ accountId: accId, ...res });
+      } catch (err) {
+        results.push({ accountId: accId, status: 'error', error: err.message });
+      }
+    }
+
+    // Сохраняем в историю
+    await new RepostHistory({
+      ruleId: rule._id,
+      sourceUrl: sourceUid,
+      text: postText,
+      results,
+      status: results.some(r => r.status === 'success') ? 'success' : 'error'
+    }).save();
+
+    rule.lastCheckedAt = new Date();
+    await rule.save();
+
+  } catch (err) {
+    console.error(`❌ Reposter error in rule ${rule.name}:`, err.message);
+  }
+}
+
+// Функция для обработки правила Telegram (через RSSHub)
+async function processTGChannelRule(rule) {
+  const username = rule.source.tgUsername.replace('@', '');
+  const rssUrl = `https://rsshub.app/telegram/channel/${username}`;
+  
+  // Временно подменяем URL и вызываем стандартный парсер RSS
+  const originalUrl = rule.source.url;
+  rule.source.url = rssUrl;
+  await processRSSRule(rule);
+  rule.source.url = originalUrl;
+}
+
+// Функция для обработки правила VK Wall
+async function processVKWallRule(rule) {
+  try {
+    const ownerId = rule.source.vkOwnerId;
+    let token = rule.source.vkToken;
+
+    // Если токен не указан в правиле, пробуем найти его в подключенных аккаунтах
+    if (!token) {
+      const vkAccount = await Account.findOne({ platform: 'vk', isActive: true });
+      if (vkAccount) {
+        token = decrypt(vkAccount.encryptedToken);
+      }
+    }
+
+    if (!token) throw new Error('No VK token available for reposter');
+
+    const response = await axios.get('https://api.vk.ru/method/wall.get', {
+      params: {
+        owner_id: ownerId,
+        count: 5,
+        access_token: token,
+        v: '5.199',
+      }
+    });
+
+    if (response.data.error) throw new Error(response.data.error.error_msg);
+
+    const items = response.data.response.items;
+    if (!items || items.length === 0) return;
+
+    // Берем самый свежий пост (не закрепленный)
+    const latestItem = items.find(item => !item.is_pinned) || items[0];
+    const sourceUid = `vk_${ownerId}_${latestItem.id}`;
+
+    const alreadyDone = await RepostHistory.findOne({ sourceUrl: sourceUid });
+    if (alreadyDone && rule.skipDuplicates) return;
+
+    console.log(`🔄 Reposter: found new VK post in ${rule.name}`);
+
+    // Извлекаем текст и вложения
+    let postText = latestItem.text || '';
+    if (rule.filters.minLength && postText.length < rule.filters.minLength) return;
+
+    const attachments = (latestItem.attachments || [])
+      .filter(a => a.type === 'photo')
+      .map(a => {
+        const sizes = a.photo.sizes;
+        return sizes[sizes.length - 1].url; // самая большая версия
+      })
+      .join(',');
+
+    if (rule.addSourceLink) postText += `\n\n🔗 https://vk.com/wall${ownerId}_${latestItem.id}`;
+    if (rule.appendText) postText += `\n\n${rule.appendText}`;
+
+    const results = [];
+    for (const accId of rule.targetAccountIds) {
+      try {
+        const res = await performPublish(accId, { text: postText, attachments });
+        results.push({ accountId: accId, ...res });
+      } catch (err) {
+        results.push({ accountId: accId, status: 'error', error: err.message });
+      }
+    }
+
+    await new RepostHistory({
+      ruleId: rule._id,
+      sourceUrl: sourceUid,
+      text: postText,
+      results,
+      status: results.some(r => r.status === 'success') ? 'success' : 'error'
+    }).save();
+
+    rule.lastCheckedAt = new Date();
+    await rule.save();
+
+  } catch (err) {
+    console.error(`❌ Reposter VK error in rule ${rule.name}:`, err.message);
+  }
+}
+
+// Главный цикл воркера (каждую минуту)
+cron.schedule('* * * * *', async () => {
+  try {
+    // 1. Проверка планировщика
+    await checkScheduledPosts();
+
+    // 2. Проверка репостера (только активные правила)
+    const activeRules = await RepostRule.find({ status: 'active' });
+    for (const rule of activeRules) {
+      if (rule.source.type === 'rss') {
+        await processRSSRule(rule);
+      } else if (rule.source.type === 'vk_wall') {
+        await processVKWallRule(rule);
+      } else if (rule.source.type === 'tg_channel') {
+        await processTGChannelRule(rule);
+      }
+    }
+  } catch (err) {
+    console.error('🛠 Worker General Error:', err);
+  }
+});
+
+// ─── Тестовые Эндпоинты (для верификации) ───────────────────────────────────
+
+app.get('/api/test/trigger', async (req, res) => {
+  console.log('🚀 Manual worker trigger received');
+  try {
+    await checkScheduledPosts();
+    const activeRules = await RepostRule.find({ status: 'active' });
+    for (const rule of activeRules) {
+      if (rule.source.type === 'rss') await processRSSRule(rule);
+      else if (rule.source.type === 'vk_wall') await processVKWallRule(rule);
+      else if (rule.source.type === 'tg_channel') await processTGChannelRule(rule);
+    }
+    res.json({ success: true, message: 'Worker triggered manually' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -157,6 +157,12 @@ export function useReposter() {
 
   useEffect(() => {
     const check = async () => {
+      const { useBackend, syncData } = useStore.getState();
+      if (useBackend) {
+        await syncData();
+        return;
+      }
+
       const activeRules = repostRules.filter((r) => r.status === 'active');
       for (const rule of activeRules) {
         if (processingRef.current.has(rule.id)) continue;

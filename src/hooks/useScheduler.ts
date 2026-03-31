@@ -15,6 +15,12 @@ export function useScheduler() {
 
   useEffect(() => {
     const tick = async () => {
+      const { useBackend, syncData } = useStore.getState();
+      if (useBackend) {
+        await syncData();
+        return;
+      }
+      
       const now = new Date();
       const { posts: currentPosts, accounts: currentAccounts } = useStore.getState();
 

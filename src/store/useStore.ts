@@ -58,7 +58,7 @@ interface AppStore {
 
   setAuthorized: (status: boolean) => void;
   setActiveTab: (tab: string) => void;
-  syncAccounts: () => Promise<void>;
+  syncData: () => Promise<void>;
   setBackendConfig: (url: string | null, enabled: boolean) => void;
 }
 
@@ -81,18 +81,24 @@ export const useStore = create<AppStore>()(
       setAiBaseUrl: (url) => set({ aiBaseUrl: url }),
       setAiModel: (model) => set({ aiModel: model }),
 
-      syncAccounts: async () => {
+      syncData: async () => {
         const { useBackend, backendUrl } = get();
         if (!useBackend || !backendUrl) return;
 
         try {
-          const res = await fetch(`${backendUrl}/api/accounts`);
-          if (res.ok) {
-            const data = await res.json();
-            set({ accounts: data });
-          }
+          const [accRes, postRes, ruleRes, historyRes] = await Promise.all([
+            fetch(`${backendUrl}/api/accounts`),
+            fetch(`${backendUrl}/api/posts`),
+            fetch(`${backendUrl}/api/reposter/rules`),
+            fetch(`${backendUrl}/api/reposter/history`),
+          ]);
+
+          if (accRes.ok) set({ accounts: await accRes.json() });
+          if (postRes.ok) set({ posts: await postRes.json() });
+          if (ruleRes.ok) set({ repostRules: await ruleRes.json() });
+          if (historyRes.ok) set({ repostHistory: await historyRes.json() });
         } catch (e) {
-          console.error('Failed to sync accounts:', e);
+          console.error('Failed to sync data:', e);
         }
       },
 
@@ -167,23 +173,55 @@ export const useStore = create<AppStore>()(
         }));
       },
 
-      addPost: (post) => {
-        const newPost: Post = {
-          ...post,
-          id: crypto.randomUUID(),
-          createdAt: new Date().toISOString(),
-          results: [],
-        };
+      addPost: async (post) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl) {
+          try {
+            const res = await fetch(`${backendUrl}/api/posts`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(post),
+            });
+            if (res.ok) {
+              const newPost = await res.json();
+              set((s) => ({ posts: [...s.posts, newPost] }));
+              return;
+            }
+          } catch (e) {
+            console.error('Backend addPost failed:', e);
+          }
+        }
+        const newPost: Post = { ...post, id: crypto.randomUUID(), createdAt: new Date().toISOString(), results: [] };
         set((s) => ({ posts: [...s.posts, newPost] }));
       },
 
-      updatePost: (id, updates) => {
+      updatePost: async (id, updates) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl && id.length > 20) { // Check if it's a MongoDB ID
+          try {
+            await fetch(`${backendUrl}/api/posts/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updates),
+            });
+          } catch (e) {
+            console.error('Backend updatePost failed:', e);
+          }
+        }
         set((s) => ({
           posts: s.posts.map((p) => (p.id === id ? { ...p, ...updates } : p)),
         }));
       },
 
-      removePost: (id) => {
+      removePost: async (id) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl && id.length > 20) {
+          try {
+            await fetch(`${backendUrl}/api/posts/${id}`, { method: 'DELETE' });
+          } catch (e) {
+            console.error('Backend removePost failed:', e);
+          }
+        }
         set((s) => ({ posts: s.posts.filter((p) => p.id !== id) }));
       },
 
@@ -203,41 +241,83 @@ export const useStore = create<AppStore>()(
         }));
       },
 
-      addRepostRule: (rule) => {
-        const newRule: RepostRule = {
-          ...rule,
-          id: crypto.randomUUID(),
-          createdAt: new Date().toISOString(),
-        };
+      addRepostRule: async (rule) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl) {
+          try {
+            const res = await fetch(`${backendUrl}/api/reposter/rules`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(rule),
+            });
+            if (res.ok) {
+              const newRule = await res.json();
+              set((s) => ({ repostRules: [...s.repostRules, newRule] }));
+              return;
+            }
+          } catch (e) {
+            console.error('Backend addRepostRule failed:', e);
+          }
+        }
+        const newRule: RepostRule = { ...rule, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
         set((s) => ({ repostRules: [...s.repostRules, newRule] }));
       },
 
-      updateRepostRule: (id, updates) => {
+      updateRepostRule: async (id, updates) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl && id.length > 20) {
+          try {
+            await fetch(`${backendUrl}/api/reposter/rules/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updates),
+            });
+          } catch (e) {
+            console.error('Backend updateRepostRule failed:', e);
+          }
+        }
         set((s) => ({
           repostRules: s.repostRules.map((r) => (r.id === id ? { ...r, ...updates } : r)),
         }));
       },
 
-      removeRepostRule: (id) => {
+      removeRepostRule: async (id) => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl && id.length > 20) {
+          try {
+            await fetch(`${backendUrl}/api/reposter/rules/${id}`, { method: 'DELETE' });
+          } catch (e) {
+            console.error('Backend removeRepostRule failed:', e);
+          }
+        }
         set((s) => ({ repostRules: s.repostRules.filter((r) => r.id !== id) }));
       },
 
-      toggleRepostRule: (id) => {
-        set((s) => ({
-          repostRules: s.repostRules.map((r) =>
-            r.id === id
-              ? { ...r, status: r.status === 'active' ? 'paused' : 'active' }
-              : r
-          ),
-        }));
+      toggleRepostRule: async (id) => {
+        const { repostRules } = get();
+        const rule = repostRules.find(r => r.id === id);
+        if (!rule) return;
+        const newStatus = rule.status === 'active' ? 'paused' : 'active';
+        get().updateRepostRule(id, { status: newStatus });
       },
 
       addRepostHistory: (item) => {
+        // We let the backend handle history creation, but we can optimistically add it locally
         const newItem: RepostHistoryItem = { ...item, id: crypto.randomUUID() };
         set((s) => ({ repostHistory: [newItem, ...s.repostHistory].slice(0, 500) }));
       },
 
-      clearRepostHistory: () => set({ repostHistory: [] }),
+      clearRepostHistory: async () => {
+        const { useBackend, backendUrl } = get();
+        if (useBackend && backendUrl) {
+          try {
+            await fetch(`${backendUrl}/api/reposter/history`, { method: 'DELETE' });
+          } catch (e) {
+            console.error('Backend clearRepostHistory failed:', e);
+          }
+        }
+        set({ repostHistory: [] });
+      },
 
       // ── UTM Presets ──────────────────────────────────────────────────────────
       addUtmPreset: (preset) => {
@@ -305,7 +385,7 @@ export const useStore = create<AppStore>()(
       setBackendConfig: (url: string | null, enabled: boolean) => {
         set({ backendUrl: url, useBackend: enabled });
         if (enabled) {
-          get().syncAccounts();
+          get().syncData();
         }
       },
 

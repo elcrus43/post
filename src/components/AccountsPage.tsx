@@ -11,12 +11,16 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   vk: 'ВКонтакте',
   ok: 'Одноклассники',
   telegram: 'Telegram',
+  tenchat: 'TenChat',
+  twitter: 'Twitter (X)',
 };
 
 const PLATFORM_COLORS: Record<Platform, string> = {
   vk: 'bg-blue-500',
   ok: 'bg-orange-500',
   telegram: 'bg-sky-500',
+  tenchat: 'bg-orange-600',
+  twitter: 'bg-black',
 };
 
 const TYPE_LABELS: Record<AccountType, string> = {
@@ -70,6 +74,12 @@ export default function AccountsPage() {
       window.history.replaceState({}, '', window.location.pathname);
     } else if (params.get('success') === 'ok_added') {
       toast.success('Аккаунт Одноклассники успешно добавлен!');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('success') === 'tenchat_added') {
+      toast.success('Аккаунт TenChat успешно добавлен!');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('success') === 'twitter_added') {
+      toast.success('Аккаунт Twitter (X) успешно добавлен!');
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
@@ -175,8 +185,8 @@ export default function AccountsPage() {
       </div>
 
       {/* Status bar */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {(['telegram', 'vk', 'ok'] as Platform[]).map((p) => {
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-6">
+        {(['telegram', 'vk', 'ok', 'tenchat', 'twitter'] as Platform[]).map((p) => {
           const count = accounts.filter((a) => a.platform === p && a.isActive).length;
           return (
             <div key={p} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
@@ -200,8 +210,8 @@ export default function AccountsPage() {
           {/* Platform */}
           <div className="mb-4">
             <label className={labelCls}>Платформа</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['telegram', 'vk', 'ok'] as Platform[]).map((p) => (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {(['telegram', 'vk', 'ok', 'tenchat', 'twitter'] as Platform[]).map((p) => (
                 <button key={p} onClick={() => setField('platform', p)}
                   className={cn('flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all',
                     form.platform === p ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
@@ -306,6 +316,50 @@ export default function AccountsPage() {
               </div>
             </div>
           )}
+
+          {/* TenChat */}
+          {form.platform === 'tenchat' && (
+            <div className="space-y-4 mb-4">
+              <div className="bg-orange-50 p-6 rounded-2xl border border-orange-100 flex flex-col items-center text-center shadow-sm">
+                <div className="w-16 h-16 bg-orange-600 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
+                  <PlatformIcon platform="tenchat" size={32} />
+                </div>
+                <h3 className="text-base font-bold text-orange-900 mb-2">Авторизация TenChat</h3>
+                <p className="text-sm text-orange-700 mb-6 max-w-sm">
+                  Подключите ваш профиль TenChat через официальное окно авторизации.
+                </p>
+                <button
+                  onClick={() => handleOAuth('tenchat')}
+                  className="w-full py-3 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-3 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                >
+                  <ExternalLink size={18} />
+                  Войти через TenChat
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Twitter */}
+          {form.platform === 'twitter' && (
+            <div className="space-y-4 mb-4">
+              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 flex flex-col items-center text-center shadow-sm">
+                <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
+                  <PlatformIcon platform="twitter" size={32} />
+                </div>
+                <h3 className="text-base font-bold text-gray-900 mb-2">Авторизация Twitter (X)</h3>
+                <p className="text-sm text-gray-700 mb-6 max-w-sm">
+                  Используйте OAuth 2.0 PKCE для безопасного подключения вашего X-аккаунта.
+                </p>
+                <button
+                  onClick={() => handleOAuth('twitter')}
+                  className="w-full py-3 bg-black text-white rounded-xl text-sm font-bold hover:bg-gray-800 transition-all flex items-center justify-center gap-3 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                >
+                  <ExternalLink size={18} />
+                  Войти через X (Twitter)
+                </button>
+              </div>
+            </div>
+          )}
+
 
           <div className="flex gap-3">
             <button onClick={handleTestForm} disabled={testingForm}
