@@ -249,12 +249,15 @@ app.get('/api/auth/vk', (req, res) => {
   const redirectUri = process.env.VK_REDIRECT_URI;
   
   if (!clientId || !clientSecret || !redirectUri) {
+    console.warn('⚠️ VK OAuth credentials missing:', { clientId: !!clientId, clientSecret: !!clientSecret, redirectUri: !!redirectUri });
     const missing = [];
     if (!clientId) missing.push('VK_CLIENT_ID');
     if (!clientSecret) missing.push('VK_CLIENT_SECRET');
     if (!redirectUri) missing.push('VK_REDIRECT_URI');
     return res.status(500).json({ error: `VK OAuth not configured. Missing in .env: ${missing.join(', ')}` });
   }
+
+  console.log('🔗 Generating VK Auth URL with redirect_uri:', redirectUri);
 
   // VK ID Authorization (Modern way)
   // 466972 = wall+groups+photos+video+audio+docs+offline
@@ -264,32 +267,31 @@ app.get('/api/auth/vk', (req, res) => {
 });
 
 app.get('/api/auth/vk/callback', async (req, res) => {
-  const { code, error, error_description } = req.query;
-
-  if (error) {
-    return res.status(400).send(`VK Auth Error: ${error_description || error}`);
-  }
+  const { code, state } = req.query;
+  console.log('📩 Received VK callback with code:', code ? 'present' : 'missing');
 
   if (!code) {
-    return res.status(400).send('No code received from VK');
+    console.error('❌ VK Auth Error: No code received in callback');
+    return res.redirect(`${process.env.FRONTEND_URL || ''}/accounts?error=vk_no_code`);
   }
 
   try {
-    // Обмениваем код на токен
-    const tokenRes = await axios.get('https://oauth.vk.com/access_token', {
+    const response = await axios.post('https://id.vk.com/oauth2/auth', null, {
       params: {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: process.env.VK_REDIRECT_URI,
         client_id: process.env.VK_CLIENT_ID,
         client_secret: process.env.VK_CLIENT_SECRET,
-        redirect_uri: process.env.VK_REDIRECT_URI,
-        code,
       }
     });
 
-    const { access_token, user_id, email } = tokenRes.data;
-
-    if (!access_token) {
-      return res.status(400).send('Failed to obtain access token from VK');
+    if (response.data.error) {
+      console.error('❌ VK Token Exchange Error:', response.data.error);
+      throw new Error(response.data.error_description || response.data.error);
     }
+
+    const { access_token, user_id } = response.data;
 
     // Получаем информацию о пользователе для базы
     const userRes = await axios.get('https://api.vk.com/method/users.get', {
@@ -1025,8 +1027,23 @@ async function performPublish(accountId, content) {
   } 
   
   if (platform === 'telegram') {
+    const tgUrl = `https://api.telegram.org/bot${token}`;
+    
+    // Вспомогательная функция для подготовки медиа для Telegram
+    const getTgFile = (mediaData) => {
+      // Если это base64 (часто с префиксом data:image/png;base64,...)
+      if (mediaData.url.startsWith('data:')) {
+        const matches = mediaData.url.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          return Buffer.from(matches[2], 'base64');
+        }
+      }
+      // Если это обычный URL
+      return mediaData.url;
+    };
+
     if (media.length === 0) {
-      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      await axios.post(`${tgUrl}/sendMessage`, {
         chat_id: ownerId,
         text: text,
         parse_mode: 'HTML'
@@ -1034,22 +1051,50 @@ async function performPublish(accountId, content) {
     } else if (media.length === 1) {
       const method = media[0].type === 'video' ? 'sendVideo' : 'sendPhoto';
       const key = media[0].type === 'video' ? 'video' : 'photo';
-      await axios.post(`https://api.telegram.org/bot${token}/${method}`, {
-        chat_id: ownerId,
-        [key]: media[0].url,
-        caption: text,
-        parse_mode: 'HTML'
-      });
+      const file = getTgFile(media[0]);
+
+      if (Buffer.isBuffer(file)) {
+        const form = new FormData();
+        form.append('chat_id', ownerId);
+        form.append(key, file, { filename: `media.${media[0].type === 'video' ? 'mp4' : 'jpg'}` });
+        form.append('caption', text);
+        form.append('parse_mode', 'HTML');
+        await axios.post(`${tgUrl}/${method}`, form, {
+          headers: { ...form.getHeaders() }
+        });
+      } else {
+        await axios.post(`${tgUrl}/${method}`, {
+          chat_id: ownerId,
+          [key]: file,
+          caption: text,
+          parse_mode: 'HTML'
+        });
+      }
     } else {
-      const mediaGroup = media.slice(0, 10).map((m, i) => ({
-        type: m.type === 'video' ? 'video' : 'photo',
-        media: m.url,
-        caption: i === 0 ? text : '',
-        parse_mode: 'HTML'
-      }));
-      await axios.post(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
-        chat_id: ownerId,
-        media: mediaGroup
+      // Для нескольких файлов Telegram требует multipart, если файлы локальные
+      const form = new FormData();
+      form.append('chat_id', ownerId);
+      
+      const mediaGroup = media.slice(0, 10).map((m, i) => {
+        const file = getTgFile(m);
+        const attachmentKey = `file_${i}`;
+        
+        if (Buffer.isBuffer(file)) {
+          form.append(attachmentKey, file, { filename: `media_${i}.${m.type === 'video' ? 'mp4' : 'jpg'}` });
+        }
+
+        return {
+          type: m.type === 'video' ? 'video' : 'photo',
+          media: Buffer.isBuffer(file) ? `attach://${attachmentKey}` : m.url,
+          caption: i === 0 ? text : '',
+          parse_mode: 'HTML'
+        };
+      });
+
+      form.append('media', JSON.stringify(mediaGroup));
+      
+      await axios.post(`${tgUrl}/sendMediaGroup`, form, {
+        headers: { ...form.getHeaders() }
       });
     }
     return { platform: 'telegram', status: 'success', postUrl: `https://t.me/${ownerId.toString().replace('-100', '')}` };
