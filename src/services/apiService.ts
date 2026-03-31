@@ -112,6 +112,18 @@ async function postToTelegram(account: Account, post: Post): Promise<PostResult>
 
 // ─── Проверка Telegram токена ─────────────────────────────────────────────────
 export async function testTelegramConnection(botToken: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  const { useBackend, backendUrl } = useStore.getState();
+
+  if (useBackend && backendUrl) {
+    try {
+      const res = await fetch(`${backendUrl}/api/test/telegram?token=${encodeURIComponent(botToken)}`);
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: 'Ошибка бэкенд-прокси для Telegram' };
+    }
+  }
+
+  // Fallback (может не работать в браузере из-за CORS)
   try {
     const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
     const data = await res.json();
@@ -120,7 +132,7 @@ export async function testTelegramConnection(botToken: string): Promise<{ ok: bo
     }
     return { ok: false, error: data.description };
   } catch (e) {
-    return { ok: false, error: 'Нет подключения к Telegram API' };
+    return { ok: false, error: 'Нет подключения к Telegram API (CORS?)' };
   }
 }
 

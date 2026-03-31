@@ -126,6 +126,22 @@ const RepostHistorySchema = new mongoose.Schema({
 });
 const RepostHistory = mongoose.model('RepostHistory', RepostHistorySchema);
 
+// ─── Проверка Telegram токена ─────────────────────────────────────────────────
+app.get('/api/test/telegram', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Missing bot token' });
+    
+    const response = await axios.get(`https://api.telegram.org/bot${token}/getMe`);
+    if (response.data.ok) {
+      return res.json({ ok: true, name: response.data.result.username });
+    }
+    res.status(400).json({ error: response.data.description });
+  } catch (err) {
+    res.status(500).json({ error: 'Telegram API error: ' + err.message });
+  }
+});
+
 // Шифрование токена (AES-256)
 const encrypt = (token) => {
   if (!token) return '';
@@ -605,24 +621,52 @@ app.get('/api/auth/twitter/callback', async (req, res) => {
   }
 });
 
+// Получить список аккаунтов
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const accounts = await Account.find().sort({ createdAt: -1 });
+    const results = accounts.map(acc => {
+      const plain = acc.toObject();
+      return {
+        id: plain._id,
+        ...plain,
+        // Ожидаемые фронтендом поля для Telegram
+        tgBotToken: acc.platform === 'telegram' ? decrypt(acc.encryptedToken) : undefined,
+        tgChatId: acc.platform === 'telegram' ? acc.ownerId : undefined,
+        // Ожидаемые поля для VK
+        vkToken: acc.platform === 'vk' ? decrypt(acc.encryptedToken) : undefined,
+        vkOwnerId: acc.platform === 'vk' ? acc.ownerId : undefined,
+        // Ожидаемые поля для OK
+        okToken: acc.platform === 'ok' ? decrypt(acc.encryptedToken) : undefined,
+        okAppSecretKey: acc.okAppSecretKey ? decrypt(acc.okAppSecretKey) : undefined,
+        // Ожидаемые поля для Twitter/TenChat
+        token: decrypt(acc.encryptedToken)
+      };
+    });
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Сохранить аккаунт (шифрует токен перед сохранением)
 app.post('/api/accounts', async (req, res) => {
   try {
-    const { platform, name, token, ownerId, okAppKey, okAppSecretKey, okGroupId } = req.body;
+    const { platform, name, token, ownerId, tgBotToken, tgChatId, okAppKey, okAppSecretKey, okGroupId } = req.body;
     
-    // Для OK ownerId может быть пустым (если это личный профиль, а не группа),
-    // поэтому делаем проверку ownerId зависимой от платформы.
-    const isOwnerIdRequired = platform !== 'ok';
-    
-    if (!platform || !name || !token || (isOwnerIdRequired && !ownerId)) {
+    // Поддержка имен полей как для Telegram (tgBotToken) так и общих (token)
+    const finalToken = token || tgBotToken;
+    const finalOwnerId = ownerId || tgChatId;
+
+    if (!platform || !name || !finalToken) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const account = new Account({
       platform,
       name,
-      ownerId,
-      encryptedToken: encrypt(token),
+      ownerId: finalOwnerId,
+      encryptedToken: encrypt(finalToken),
       okAppKey,
       okAppSecretKey: okAppSecretKey ? encrypt(okAppSecretKey) : undefined,
       okGroupId,
@@ -633,11 +677,9 @@ app.post('/api/accounts', async (req, res) => {
       id: account._id, 
       platform, 
       name, 
-      ownerId,
-      vkOwnerId: platform === 'vk' ? ownerId : undefined,
-      tgChatId: platform === 'telegram' ? ownerId : undefined,
-      okGroupId: platform === 'ok' ? okGroupId : undefined,
-      okAppKey, 
+      ownerId: finalOwnerId,
+      tgBotToken: finalToken,
+      tgChatId: finalOwnerId,
       isActive: account.isActive,
       createdAt: account.createdAt
     });
@@ -961,13 +1003,19 @@ async function performPublish(accountId, content) {
 
   const token = decrypt(account.encryptedToken);
   const { platform, ownerId } = account;
+  const media = content.media || [];
+  const text = content.text || '';
+
+  console.log(`🚀 Publishing to ${platform} (${ownerId}) | Media count: ${media.length}`);
 
   if (platform === 'vk') {
+    // ВКонтакте принимает attachments как строку через запятую ссылок или медиа-ID
+    const attachmentsString = media.map(m => m.url).join(',');
     const response = await axios.post('https://api.vk.ru/method/wall.post', null, {
       params: {
         owner_id: ownerId,
-        message: content.text,
-        attachments: content.attachments || '',
+        message: text,
+        attachments: attachmentsString || content.attachments || '',
         access_token: token,
         v: '5.199',
       }
@@ -977,22 +1025,34 @@ async function performPublish(accountId, content) {
   } 
   
   if (platform === 'telegram') {
-    const response = await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
-      chat_id: ownerId,
-      text: content.text,
-      parse_mode: 'HTML'
-    });
-    return { platform: 'telegram', status: 'success', postUrl: `https://t.me/${ownerId}` }; // Ссылка на чат/канал
-  }
-
-  if (platform === 'tenchat') {
-    const response = await axios.post('https://api.tenchat.ru/v1/posts', {
-      text: content.text,
-      attachments: content.attachments ? content.attachments.split(',') : []
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    return { platform: 'tenchat', status: 'success', postId: response.data.id, postUrl: `https://tenchat.ru/post/${response.data.id}` };
+    if (media.length === 0) {
+      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+        chat_id: ownerId,
+        text: text,
+        parse_mode: 'HTML'
+      });
+    } else if (media.length === 1) {
+      const method = media[0].type === 'video' ? 'sendVideo' : 'sendPhoto';
+      const key = media[0].type === 'video' ? 'video' : 'photo';
+      await axios.post(`https://api.telegram.org/bot${token}/${method}`, {
+        chat_id: ownerId,
+        [key]: media[0].url,
+        caption: text,
+        parse_mode: 'HTML'
+      });
+    } else {
+      const mediaGroup = media.slice(0, 10).map((m, i) => ({
+        type: m.type === 'video' ? 'video' : 'photo',
+        media: m.url,
+        caption: i === 0 ? text : '',
+        parse_mode: 'HTML'
+      }));
+      await axios.post(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
+        chat_id: ownerId,
+        media: mediaGroup
+      });
+    }
+    return { platform: 'telegram', status: 'success', postUrl: `https://t.me/${ownerId.toString().replace('-100', '')}` };
   }
 
   if (platform === 'ok') {
@@ -1001,13 +1061,11 @@ async function performPublish(accountId, content) {
     const sessionSecretKey = md5(token + secretKey).toLowerCase();
     
     const attachmentObj = {
-      media: [{ type: 'text', text: content.text }]
+      media: [{ type: 'text', text: text }]
     };
-    if (content.attachments) {
-      content.attachments.split(',').forEach(url => {
-        attachmentObj.media.push({ type: 'photo', url });
-      });
-    }
+    media.forEach(m => {
+      attachmentObj.media.push({ type: 'photo', url: m.url });
+    });
 
     const params = {
       application_key: appKey,
@@ -1015,7 +1073,7 @@ async function performPublish(accountId, content) {
       format: 'json',
       method: 'mediatopic.post',
       type: 'GROUP_THEME',
-      ...(account.okGroupId ? { gid: account.okGroupId } : {}),
+      ...(ownerId ? { gid: ownerId } : {}),
     };
 
     const sig = okSign(params, sessionSecretKey);
@@ -1023,11 +1081,78 @@ async function performPublish(accountId, content) {
       params: { ...params, sig, access_token: token }
     });
 
-    if (response.data.error_code) throw new Error(response.data.error_msg);
-    return { platform: 'ok', status: 'success', postUrl: `https://ok.ru/group/${account.okGroupId || 'profile'}` };
+    if (response.data.error_code) throw new Error(`OK Error ${response.data.error_code}: ${response.data.error_msg}`);
+    return { platform: 'ok', status: 'success', postId: response.data };
+  }
+
+  if (platform === 'twitter') {
+    return await performPublishTwitter(account, content);
+  }
+
+  if (platform === 'tenchat') {
+    const response = await axios.post('https://api.tenchat.ru/v1/posts', {
+      text: text,
+      attachments: media.map(m => m.url)
+    }, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return { platform: 'tenchat', status: 'success', postId: response.data.id };
   }
 
   throw new Error(`Unsupported platform: ${platform}`);
+}
+
+async function performPublishTwitter(account, content) {
+  const token = decrypt(account.encryptedToken);
+  const media = content.media || [];
+  const text = content.text || '';
+  
+  const tweetData = { text };
+
+  if (media.length > 0) {
+    const mediaIds = [];
+    for (const m of media.slice(0, 4)) {
+      try {
+        // 1. Скачиваем файл во временный буфер
+        const downloadRes = await axios.get(m.url, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(downloadRes.data);
+        
+        // 2. Загружаем в Twitter v1.1 (Multipart)
+        const form = new FormData();
+        form.append('media', buffer, { filename: m.name || 'image.jpg' });
+        
+        const uploadRes = await axios.post('https://upload.twitter.com/1.1/media/upload.json', form, {
+          headers: { 
+            ...form.getHeaders(),
+            'Authorization': `Bearer ${token}` 
+          }
+        });
+        
+        if (uploadRes.data.media_id_string) {
+          mediaIds.push(uploadRes.data.media_id_string);
+        }
+      } catch (e) {
+        console.error('Twitter Media Upload Error:', e.response?.data || e.message);
+      }
+    }
+    if (mediaIds.length > 0) {
+      tweetData.media = { media_ids: mediaIds };
+    }
+  }
+
+  const response = await axios.post('https://api.twitter.com/2/tweets', tweetData, {
+    headers: { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  return { 
+    platform: 'twitter', 
+    status: 'success', 
+    postId: response.data.data.id,
+    postUrl: `https://twitter.com/i/status/${response.data.data.id}`
+  };
 }
 
 // ─── API Эндпоинты для Планировщика (Posts) ───────────────────────────────────

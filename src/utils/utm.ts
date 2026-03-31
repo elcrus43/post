@@ -5,6 +5,8 @@ export const platformToSource: Record<Platform, string> = {
   vk: 'vkontakte',
   ok: 'odnoklassniki',
   telegram: 'telegram',
+  tenchat: 'tenchat',
+  twitter: 'twitter',
 };
 
 // Маппинг платформы → utm_medium (по умолчанию)

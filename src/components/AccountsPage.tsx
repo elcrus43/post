@@ -106,9 +106,13 @@ export default function AccountsPage() {
     } else if (form.platform === 'ok') {
       if (!form.okToken || !form.okAppKey || !form.okAppSecretKey) { toast.error('Заполните все поля Одноклассников'); return; }
       addAccount({ ...base, okToken: form.okToken, okAppKey: form.okAppKey, okAppSecretKey: form.okAppSecretKey, okGroupId: form.okGroupId });
-    } else {
+    } else if (form.platform === 'telegram') {
       if (!form.tgBotToken || !form.tgChatId) { toast.error('Заполните Bot Token и Chat ID'); return; }
       addAccount({ ...base, tgBotToken: form.tgBotToken, tgChatId: form.tgChatId });
+    } else {
+      // Для TenChat и Twitter используем OAuth (добавление через редирект)
+      handleOAuth(form.platform);
+      return;
     }
 
     toast.success('Аккаунт добавлен!');
@@ -302,9 +306,9 @@ export default function AccountsPage() {
                 <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
                   <PlatformIcon platform="ok" size={32} />
                 </div>
-                <h3 className="text-base font-bold text-orange-900 mb-2">Авторизация OK</h3>
+                <h3 className="text-base font-bold text-orange-900 mb-2">Авторизация OK.ru</h3>
                 <p className="text-sm text-orange-700 mb-6 max-w-sm">
-                  Подключите ваш профиль или группу Одноклассников через официальное окно авторизации.
+                  Подключите вашу страницу или группу в Одноклассниках.
                 </p>
                 <button
                   onClick={() => handleOAuth('ok')}

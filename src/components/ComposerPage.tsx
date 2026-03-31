@@ -104,22 +104,17 @@ export default function ComposerPage() {
   const selectAll = () =>
     setSelectedAccounts(selectedAccounts.length === activeAccounts.length ? [] : activeAccounts.map((a) => a.id));
 
-  // ── UTM ──────────────────────────────────────────────────────────────────────
-  const getUtmParams = (platform: Platform): UtmParams | undefined => {
-    if (!utmEnabled || !utmCampaign) return undefined;
-    return generateUtmParams(platform, toSlug(utmCampaign), utmContent || undefined, utmMedium || undefined, utmTerm || undefined);
-  };
-
-  const getTextWithUtm = (platform: Platform): string => {
-    const params = getUtmParams(platform);
-    if (!params) return text;
-    return injectUtmIntoText(text, params);
-  };
-
   // ── Публикация ───────────────────────────────────────────────────────────────
   const handlePublish = async () => {
     if (!text.trim() && media.length === 0) { toast.error('Введите текст или добавьте медиа'); return; }
     if (selectedAccounts.length === 0) { toast.error('Выберите хотя бы один аккаунт'); return; }
+
+    // Собираем финальный текст с упоминаниями и стикерами
+    const enrichedText = [
+      text,
+      mentions.length > 0 ? mentions.map((m) => `@${m.handle}`).join(' ') : '',
+      stickers.length > 0 ? stickers.map((s) => s.emoji).join(' ') : '',
+    ].filter(Boolean).join('\n\n');
 
     const utmParams = utmEnabled && utmCampaign
       ? { source: 'social', medium: utmMedium, campaign: toSlug(utmCampaign), content: utmContent || undefined, term: utmTerm || undefined }
@@ -132,7 +127,7 @@ export default function ComposerPage() {
 
     if (isScheduled) {
       addPost({
-        text,
+        text: enrichedText,
         media,
         targetAccounts: selectedAccounts,
         status: 'scheduled',
@@ -153,55 +148,76 @@ export default function ComposerPage() {
 
     setIsPublishing(true);
 
-    addPost({
-      text,
-      media,
-      targetAccounts: selectedAccounts,
-      status: 'publishing',
-      utmEnabled,
-      utmParams,
-      stickers,
-      mentions,
-      firstComment: firstComment.enabled ? firstComment : undefined,
-      autoDelete: autoDelete.enabled ? autoDelete : undefined,
-      disableComments,
-      isVkStory,
-    });
+    try {
+      addPost({
+        text: enrichedText,
+        media,
+        targetAccounts: selectedAccounts,
+        status: 'publishing',
+        utmEnabled,
+        utmParams,
+        stickers,
+        mentions,
+        firstComment: firstComment.enabled ? firstComment : undefined,
+        autoDelete: autoDelete.enabled ? autoDelete : undefined,
+        disableComments,
+        isVkStory,
+      });
 
-    const { posts } = useStore.getState();
-    const post = posts[posts.length - 1];
+      const { posts } = useStore.getState();
+      const post = posts[posts.length - 1];
 
-    const targetAccs = accounts.filter((a) => selectedAccounts.includes(a.id));
-    const results: PostResult[] = [];
+      const targetAccs = accounts.filter((a) => selectedAccounts.includes(a.id));
+      const results: PostResult[] = [];
 
-    for (const acc of targetAccs) {
-      const postWithUtm = utmEnabled && utmCampaign
-        ? { ...post, text: getTextWithUtm(acc.platform) }
-        : post;
-      const result = await publishToAccount(acc, postWithUtm);
-      results.push(result);
-      updatePostResult(post.id, result);
+      for (const acc of targetAccs) {
+        try {
+          // Применяем UTM к ОБОГАЩЁННОМУ тексту
+          const getTextWithUtmCustom = (platform: Platform, baseText: string): string => {
+            const params = generateUtmParams(platform, toSlug(utmCampaign), utmContent || undefined, utmMedium || undefined, utmTerm || undefined);
+            if (!params) return baseText;
+            return injectUtmIntoText(baseText, params);
+          };
+
+          const finalPostText = utmEnabled && utmCampaign
+            ? getTextWithUtmCustom(acc.platform, enrichedText)
+            : enrichedText;
+
+          const postToPublish = { ...post, text: finalPostText };
+          const result = await publishToAccount(acc, postToPublish);
+          results.push(result);
+          updatePostResult(post.id, result);
+        } catch (err) {
+          const errorRes: PostResult = { accountId: acc.id, platform: acc.platform, status: 'error', error: String(err) };
+          results.push(errorRes);
+          updatePostResult(post.id, errorRes);
+        }
+      }
+
+      const successCount = results.filter((r) => r.status === 'success').length;
+      const failCount = results.filter((r) => r.status === 'error').length;
+
+      // Если авто-удаление — вычислим время удаления
+      const deleteAt = autoDelete.enabled
+        ? new Date(Date.now() + autoDelete.afterMinutes * 60 * 1000).toISOString()
+        : undefined;
+
+      updatePost(post.id, {
+        status: failCount === results.length ? 'failed' : 'published',
+        publishedAt: new Date().toISOString(),
+        deleteAt,
+      });
+
+      if (successCount > 0) toast.success(`Опубликовано в ${successCount} аккаунт(а/ов)`);
+      if (failCount > 0) toast.error(`Ошибка в ${failCount} аккаунт(а/ов)`);
+      
+      resetForm();
+    } catch (error) {
+      console.error('Publish error:', error);
+      toast.error('Произошла критическая ошибка при публикации');
+    } finally {
+      setIsPublishing(false);
     }
-
-    const successCount = results.filter((r) => r.status === 'success').length;
-    const failCount = results.filter((r) => r.status === 'error').length;
-
-    // Если авто-удаление — вычислим время удаления
-    const deleteAt = autoDelete.enabled
-      ? new Date(Date.now() + autoDelete.afterMinutes * 60 * 1000).toISOString()
-      : undefined;
-
-    updatePost(post.id, {
-      status: failCount === results.length ? 'failed' : 'published',
-      publishedAt: new Date().toISOString(),
-      deleteAt,
-    });
-
-    if (successCount > 0) toast.success(`Опубликовано в ${successCount} аккаунт(а/ов)`);
-    if (failCount > 0) toast.error(`Ошибка в ${failCount} аккаунт(а/ов)`);
-
-    setIsPublishing(false);
-    resetForm();
   };
 
   const resetForm = () => {
