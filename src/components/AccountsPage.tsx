@@ -266,88 +266,44 @@ export default function AccountsPage() {
           {/* VK */}
           {form.platform === 'vk' && (
             <div className="space-y-4 mb-4">
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col items-center text-center">
-                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white mb-3 shadow-md">
-                  <PlatformIcon platform="vk" size={24} />
+              <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex flex-col items-center text-center shadow-sm">
+                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
+                  <PlatformIcon platform="vk" size={32} />
                 </div>
-                <h3 className="text-sm font-bold text-blue-900 mb-1">Официальная авторизация VK ID</h3>
-                <p className="text-xs text-blue-700 mb-4 max-w-sm">
-                  Безопасный способ подключения через официальное окно ВКонтакте.
-                  Не требует ручного ввода токенов.
+                <h3 className="text-base font-bold text-blue-900 mb-2">Авторизация VK ID</h3>
+                <p className="text-sm text-blue-700 mb-6 max-w-sm">
+                  Нажмите кнопку ниже, чтобы безопасно подключить ваш аккаунт или группу через официальный сервис ВКонтакте.
                 </p>
                 <button
                   onClick={() => handleOAuth('vk')}
-                  className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-3 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                 >
-                  <ExternalLink size={16} />
+                  <ExternalLink size={18} />
                   Войти через ВКонтакте
                 </button>
               </div>
-
-              <details className="group">
-                <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 transition-colors text-center list-none">
-                  Настроить вручную (для продвинутых)
-                </summary>
-                <div className="mt-4 space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                  <div>
-                    <label className={labelCls}>Access Token</label>
-                    <input className={inputCls} placeholder="vk1.a...."
-                      value={form.vkToken} onChange={(e) => setField('vkToken', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Owner ID</label>
-                    <input className={inputCls} placeholder="-123456789 (группа) или 123456 (пользователь)"
-                      value={form.vkOwnerId} onChange={(e) => setField('vkOwnerId', e.target.value)} />
-                  </div>
-                </div>
-              </details>
             </div>
           )}
 
           {/* OK */}
           {form.platform === 'ok' && (
             <div className="space-y-4 mb-4">
-              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex flex-col items-center text-center">
-                <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white mb-3 shadow-md">
-                  <PlatformIcon platform="ok" size={24} />
+              <div className="bg-orange-50 p-6 rounded-2xl border border-orange-100 flex flex-col items-center text-center shadow-sm">
+                <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
+                  <PlatformIcon platform="ok" size={32} />
                 </div>
-                <h3 className="text-sm font-bold text-orange-900 mb-1">Официальная авторизация OK</h3>
-                <p className="text-xs text-orange-700 mb-4 max-w-sm">
-                  Подключите ваш профиль или группу Одноклассников через официальное приложение.
+                <h3 className="text-base font-bold text-orange-900 mb-2">Авторизация OK</h3>
+                <p className="text-sm text-orange-700 mb-6 max-w-sm">
+                  Подключите ваш профиль или группу Одноклассников через официальное окно авторизации.
                 </p>
                 <button
                   onClick={() => handleOAuth('ok')}
-                  className="w-full py-2.5 bg-orange-600 text-white rounded-xl text-sm font-semibold hover:bg-orange-700 transition-all flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full py-3 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-3 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                 >
-                  <ExternalLink size={16} />
+                  <ExternalLink size={18} />
                   Войти через Одноклассники
                 </button>
               </div>
-
-              <details className="group">
-                <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 transition-colors text-center list-none">
-                  Настроить вручную (старый способ)
-                </summary>
-                <div className="mt-4 space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                  <div>
-                    <label className={labelCls}>Access Token</label>
-                    <input className={inputCls} placeholder="Access token"
-                      value={form.okToken} onChange={(e) => setField('okToken', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Application Key</label>
-                    <input className={inputCls} value={form.okAppKey} onChange={(e) => setField('okAppKey', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Secret Key</label>
-                    <input className={inputCls} type="password" value={form.okAppSecretKey} onChange={(e) => setField('okAppSecretKey', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Group ID (опционально)</label>
-                    <input className={inputCls} value={form.okGroupId} onChange={(e) => setField('okGroupId', e.target.value)} />
-                  </div>
-                </div>
-              </details>
             </div>
           )}
 
