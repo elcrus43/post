@@ -1628,9 +1628,6 @@ console.log('');
 // Keep server alive for Railway
 const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
-
-  // Keep process alive - prevent Railway from thinking we're done
-  setInterval(() => { }, 30000);
 });
 
 // Handle server errors
