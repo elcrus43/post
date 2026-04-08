@@ -6,6 +6,7 @@ const CryptoJS = require('crypto-js');
 const mongoose = require('mongoose');
 const md5 = require('md5');
 const path = require('path');
+const fs = require('fs');
 const FormData = require('form-data');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const rateLimit = require('express-rate-limit');
@@ -1647,5 +1648,16 @@ process.on('uncaughtException', (err) => {
 // Все остальные GET-запросы отправляют index.html (для React Router)
 // ВАЖНО: Это должно быть в самом конце!
 app.get('*', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error('Error sending file:', err.message);
+        res.status(err.status || 500).send('Error loading application');
+      }
+    });
+  } else {
+    console.warn('⚠️ Frontend not built. dist/index.html not found.');
+    res.status(200).send('<h1>Backend is running</h1><p>Frontend needs to be built. Run: npm run build</p>');
+  }
 });
