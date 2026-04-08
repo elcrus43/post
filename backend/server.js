@@ -169,24 +169,14 @@ const authProxyMiddleware = (req, res, next) => {
 app.use("/vk", authProxyMiddleware, createProxyMiddleware({ target: "https://api.vk.com", changeOrigin: true }));
 app.use("/ok", authProxyMiddleware, createProxyMiddleware({ target: "https://api.ok.ru", changeOrigin: true }));
 
-// Подключение к MongoDB
-if (process.env.MONGO_URI) {
-  mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('✅ MongoDB connected'))
-    .catch(err => console.error('❌ MongoDB connection error:', err.message));
-} else {
-  console.warn('⚠️ MONGO_URI is not set. Database features will be disabled.');
-}
-
-// Схема аккаунта с зашифрованными токенами
+// Схемы и модели (без подключения к БД)
 const AccountSchema = new mongoose.Schema({
   platform: String,
   name: String,
-  encryptedToken: String, // токен НИКОГДА не хранится открыто
+  encryptedToken: String,
   ownerId: String,
-  // OK-specific fields (encrypted if sensitive)
   okAppKey: String,
-  okAppSecretKey: String, // encrypted similarly to token? Let's encrypt it too
+  okAppSecretKey: String,
   okGroupId: String,
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
@@ -1628,6 +1618,16 @@ console.log('');
 // Keep server alive for Railway
 const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
+  console.log(`✅ Health check available at http://${HOST}:${PORT}/health`);
+
+  // MongoDB подключение ПОСЛЕ запуска сервера (чтобы healthcheck прошёл)
+  if (process.env.MONGO_URI) {
+    mongoose.connect(process.env.MONGO_URI)
+      .then(() => console.log('✅ MongoDB connected'))
+      .catch(err => console.error('❌ MongoDB connection error:', err.message));
+  } else {
+    console.warn('⚠️ MONGO_URI is not set. Database features will be disabled.');
+  }
 });
 
 // Handle server errors
@@ -1643,6 +1643,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (err) => {
   console.error('🚨 Uncaught Exception:', err);
+  process.exit(1);
 });
 
 // Все остальные GET-запросы отправляют index.html (для React Router)
