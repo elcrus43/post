@@ -22,9 +22,8 @@ const __dirname = path.dirname(__filename);
 const parser = new Parser();
 
 const app = express();
-app.use(cookieParser());
 
-// Health check endpoints - MUST be before all middleware for Railway
+// Health check endpoints - MUST be before ALL middleware for Railway
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', time: new Date().toISOString() });
 });
@@ -33,6 +32,8 @@ app.get('/ready', (req, res) => {
   const isReady = mongoose.connection.readyState === 1;
   res.status(isReady ? 200 : 503).json({ status: isReady ? 'ready' : 'not_ready' });
 });
+
+app.use(cookieParser());
 
 // FIX #8: Пароль обязателен для безопасности
 const APP_PASSWORD = process.env.APP_PASSWORD;
@@ -1601,8 +1602,8 @@ app.get('/api/test/trigger', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = '0.0.0.0'; // Railway требует 0.0.0.0
 
 console.log('\n🚀 Starting server...');
 console.log(`📡 Port: ${PORT}`);
@@ -1616,25 +1617,30 @@ console.log(`💾 ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? 'set' : 'MISSIN
 console.log('');
 
 // Keep server alive for Railway
-const server = app.listen(PORT, HOST, () => {
-  console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
-  console.log(`✅ Health check available at http://${HOST}:${PORT}/health`);
+try {
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
+    console.log(`✅ Health check available at http://${HOST}:${PORT}/health`);
 
-  // MongoDB подключение ПОСЛЕ запуска сервера (чтобы healthcheck прошёл)
-  if (process.env.MONGO_URI) {
-    mongoose.connect(process.env.MONGO_URI)
-      .then(() => console.log('✅ MongoDB connected'))
-      .catch(err => console.error('❌ MongoDB connection error:', err.message));
-  } else {
-    console.warn('⚠️ MONGO_URI is not set. Database features will be disabled.');
-  }
-});
+    // MongoDB подключение ПОСЛЕ запуска сервера (чтобы healthcheck прошёл)
+    if (process.env.MONGO_URI) {
+      mongoose.connect(process.env.MONGO_URI)
+        .then(() => console.log('✅ MongoDB connected'))
+        .catch(err => console.error('❌ MongoDB connection error:', err.message));
+    } else {
+      console.warn('⚠️ MONGO_URI is not set. Database features will be disabled.');
+    }
+  });
 
-// Handle server errors
-server.on('error', (err) => {
-  console.error('❌ Server error:', err);
+  // Handle server errors
+  server.on('error', (err) => {
+    console.error('❌ Server error:', err);
+    process.exit(1);
+  });
+} catch (err) {
+  console.error('❌ Failed to start server:', err);
   process.exit(1);
-});
+}
 
 // Prevent unhandled rejections from crashing
 process.on('unhandledRejection', (reason, promise) => {
