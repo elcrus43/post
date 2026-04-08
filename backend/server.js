@@ -24,6 +24,16 @@ const parser = new Parser();
 const app = express();
 app.use(cookieParser());
 
+// Health check endpoints - MUST be before all middleware for Railway
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', time: new Date().toISOString() });
+});
+
+app.get('/ready', (req, res) => {
+  const isReady = mongoose.connection.readyState === 1;
+  res.status(isReady ? 200 : 503).json({ status: isReady ? 'ready' : 'not_ready' });
+});
+
 // FIX #8: Пароль обязателен для безопасности
 const APP_PASSWORD = process.env.APP_PASSWORD;
 
@@ -1599,16 +1609,6 @@ app.get('/api/test/trigger', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
-
-// Health check endpoints (must be BEFORE app.listen)
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
-
-app.get('/ready', (req, res) => {
-  const isReady = mongoose.connection.readyState === 1;
-  res.status(isReady ? 200 : 503).send(isReady ? 'Ready' : 'Not Ready');
 });
 
 const PORT = process.env.PORT || 3000;
