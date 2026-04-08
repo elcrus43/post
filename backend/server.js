@@ -9,6 +9,7 @@ import md5 from 'md5';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import http from 'http';
 import FormData from 'form-data';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import rateLimit from 'express-rate-limit';
@@ -23,17 +24,26 @@ const parser = new Parser();
 
 const app = express();
 
-// Health check endpoints - MUST be before ALL middleware for Railway
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', time: new Date().toISOString() });
+// ============================================
+// SIMPLE HEALTH CHECK SERVER (Raw Node.js HTTP)
+// This runs BEFORE Express to guarantee Railway healthcheck passes
+// ============================================
+const HEALTH_PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = '0.0.0.0';
+
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/ready') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', time: new Date().toISOString() }));
+  } else {
+    // Pass all other requests to Express
+    app(req, res);
+  }
 });
 
-app.get('/ready', (req, res) => {
-  const isReady = mongoose.connection.readyState === 1;
-  res.status(isReady ? 200 : 503).json({ status: isReady ? 'ready' : 'not_ready' });
+healthServer.on('error', (err) => {
+  console.error('❌ Health server error:', err);
 });
-
-app.use(cookieParser());
 
 // FIX #8: Пароль обязателен для безопасности
 const APP_PASSWORD = process.env.APP_PASSWORD;
@@ -1616,11 +1626,12 @@ console.log(`📦 FRONTEND_URL: ${process.env.FRONTEND_URL || 'not set'}`);
 console.log(`💾 ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? 'set' : 'MISSING'}`);
 console.log('');
 
-// Keep server alive for Railway
+// Start the combined health+express server
 try {
-  const server = app.listen(PORT, HOST, () => {
+  healthServer.listen(PORT, HOST, () => {
     console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
     console.log(`✅ Health check available at http://${HOST}:${PORT}/health`);
+    console.log(`✅ Express app mounted`);
 
     // MongoDB подключение ПОСЛЕ запуска сервера (чтобы healthcheck прошёл)
     if (process.env.MONGO_URI) {
@@ -1633,7 +1644,7 @@ try {
   });
 
   // Handle server errors
-  server.on('error', (err) => {
+  healthServer.on('error', (err) => {
     console.error('❌ Server error:', err);
     process.exit(1);
   });
