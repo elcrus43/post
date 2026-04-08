@@ -1,19 +1,24 @@
 // server.js — прокси для безопасной публикации в VK, OK и Telegram
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const CryptoJS = require('crypto-js');
-const mongoose = require('mongoose');
-const md5 = require('md5');
-const path = require('path');
-const fs = require('fs');
-const FormData = require('form-data');
-const { createProxyMiddleware } = require('http-proxy-middleware');
-const rateLimit = require('express-rate-limit');
-require('dotenv').config();
-const cookieParser = require('cookie-parser');
-const cron = require('node-cron');
-const Parser = require('rss-parser');
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import CryptoJS from 'crypto-js';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import md5 from 'md5';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import FormData from 'form-data';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import rateLimit from 'express-rate-limit';
+import 'dotenv/config';
+import cookieParser from 'cookie-parser';
+import cron from 'node-cron';
+import Parser from 'rss-parser';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const parser = new Parser();
 
 const app = express();
@@ -640,8 +645,6 @@ app.get('/api/auth/tenchat/callback', async (req, res) => {
 });
 
 // ─── Twitter (X) OAuth 2.0 + PKCE ────────────────────────────────────────────
-
-const crypto = require('crypto');
 
 function generateCodeVerifier() {
   return crypto.randomBytes(32).toString('hex'); // 64 chars
