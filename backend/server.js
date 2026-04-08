@@ -1597,6 +1597,16 @@ app.get('/api/test/trigger', async (req, res) => {
   }
 });
 
+// Health check endpoints (must be BEFORE app.listen)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.get('/ready', (req, res) => {
+  const isReady = mongoose.connection.readyState === 1;
+  res.status(isReady ? 200 : 503).send(isReady ? 'Ready' : 'Not Ready');
+});
+
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -1632,16 +1642,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (err) => {
   console.error('🚨 Uncaught Exception:', err);
-});
-
-// Health check endpoints
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
-
-app.get('/ready', (req, res) => {
-  const isReady = mongoose.connection.readyState === 1;
-  res.status(isReady ? 200 : 503).send(isReady ? 'Ready' : 'Not Ready');
 });
 
 // Все остальные GET-запросы отправляют index.html (для React Router)
