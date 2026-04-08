@@ -85,12 +85,16 @@ export const useStore = create<AppStore>()(
         const { useBackend, backendUrl } = get();
         if (!useBackend || !backendUrl) return;
 
+        // Нормализация URL: убираем лишние слеши в конце
+        const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+
         try {
+          const fetchOpts = { credentials: 'include' as const };
           const [accRes, postRes, ruleRes, historyRes] = await Promise.all([
-            fetch(`${backendUrl}/api/accounts`),
-            fetch(`${backendUrl}/api/posts`),
-            fetch(`${backendUrl}/api/reposter/rules`),
-            fetch(`${backendUrl}/api/reposter/history`),
+            fetch(`${baseUrl}/api/accounts`, fetchOpts),
+            fetch(`${baseUrl}/api/posts`, fetchOpts),
+            fetch(`${baseUrl}/api/reposter/rules`, fetchOpts),
+            fetch(`${baseUrl}/api/reposter/history`, fetchOpts),
           ]);
 
           if (accRes.ok) set({ accounts: await accRes.json() });
@@ -106,10 +110,12 @@ export const useStore = create<AppStore>()(
         const { useBackend, backendUrl } = get();
 
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            const res = await fetch(`${backendUrl}/api/accounts`, {
+            const res = await fetch(`${baseUrl}/api/accounts`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify({
                 platform: account.platform,
                 name: account.name,
@@ -148,8 +154,12 @@ export const useStore = create<AppStore>()(
       removeAccount: async (id) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/accounts/${id}`, { method: 'DELETE' });
+            await fetch(`${baseUrl}/api/accounts/${id}`, { 
+              method: 'DELETE',
+              credentials: 'include'
+            });
           } catch (e) {
             console.error('Backend delete failed:', e);
           }
@@ -160,8 +170,12 @@ export const useStore = create<AppStore>()(
       toggleAccount: async (id) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/accounts/${id}/toggle`, { method: 'PATCH' });
+            await fetch(`${baseUrl}/api/accounts/${id}/toggle`, { 
+              method: 'PATCH',
+              credentials: 'include'
+            });
           } catch (e) {
             console.error('Backend toggle failed:', e);
           }
@@ -176,10 +190,12 @@ export const useStore = create<AppStore>()(
       addPost: async (post) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            const res = await fetch(`${backendUrl}/api/posts`, {
+            const res = await fetch(`${baseUrl}/api/posts`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify(post),
             });
             if (res.ok) {
@@ -198,10 +214,12 @@ export const useStore = create<AppStore>()(
       updatePost: async (id, updates) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl && id.length > 20) { // Check if it's a MongoDB ID
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/posts/${id}`, {
+            await fetch(`${baseUrl}/api/posts/${id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify(updates),
             });
           } catch (e) {
@@ -216,8 +234,12 @@ export const useStore = create<AppStore>()(
       removePost: async (id) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl && id.length > 20) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/posts/${id}`, { method: 'DELETE' });
+            await fetch(`${baseUrl}/api/posts/${id}`, { 
+              method: 'DELETE',
+              credentials: 'include'
+            });
           } catch (e) {
             console.error('Backend removePost failed:', e);
           }
@@ -244,10 +266,12 @@ export const useStore = create<AppStore>()(
       addRepostRule: async (rule) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            const res = await fetch(`${backendUrl}/api/reposter/rules`, {
+            const res = await fetch(`${baseUrl}/api/reposter/rules`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify(rule),
             });
             if (res.ok) {
@@ -266,10 +290,12 @@ export const useStore = create<AppStore>()(
       updateRepostRule: async (id, updates) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl && id.length > 20) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/reposter/rules/${id}`, {
+            await fetch(`${baseUrl}/api/reposter/rules/${id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
               body: JSON.stringify(updates),
             });
           } catch (e) {
@@ -284,8 +310,12 @@ export const useStore = create<AppStore>()(
       removeRepostRule: async (id) => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl && id.length > 20) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/reposter/rules/${id}`, { method: 'DELETE' });
+            await fetch(`${baseUrl}/api/reposter/rules/${id}`, { 
+              method: 'DELETE',
+              credentials: 'include'
+            });
           } catch (e) {
             console.error('Backend removeRepostRule failed:', e);
           }
@@ -310,8 +340,12 @@ export const useStore = create<AppStore>()(
       clearRepostHistory: async () => {
         const { useBackend, backendUrl } = get();
         if (useBackend && backendUrl) {
+          const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
-            await fetch(`${backendUrl}/api/reposter/history`, { method: 'DELETE' });
+            await fetch(`${baseUrl}/api/reposter/history`, { 
+              method: 'DELETE',
+              credentials: 'include'
+            });
           } catch (e) {
             console.error('Backend clearRepostHistory failed:', e);
           }

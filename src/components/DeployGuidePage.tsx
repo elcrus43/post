@@ -528,32 +528,32 @@ git push -u origin main`} />
             <Step number={5} title="OAuth — настроить авторизацию (VK и OK)">
               <div className="space-y-3">
                 <p>Для работы "официального" подключения без ручного ввода токенов нужно создать приложения на платформах.</p>
-                
+
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-blue-800 text-xs uppercase tracking-wider">Настройка ВКонтакте</h4>
-                  <p className="text-xs text-blue-700">1. Зайти в <a href="https://id.vk.com/about/business/go" target="_blank" className="underline">VK ID для бизнеса</a> → Создать приложение.</p>
+                  <p className="text-xs text-blue-700">1. Зайти в <a href="https://id.vk.com/about/business/go" target="_blank" rel="noopener noreferrer" className="underline">VK ID для бизнеса</a> → Создать приложение.</p>
                   <p className="text-xs text-blue-700">2. Тип: <strong>Standalone-приложение</strong>.</p>
-                  <p className="text-xs text-blue-700">3. В Настройках укажите Redirect URI:<br/><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/vk/callback</code></p>
+                  <p className="text-xs text-blue-700">3. В Настройках укажите Redirect URI:<br /><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/vk/callback</code></p>
                 </div>
 
                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-orange-800 text-xs uppercase tracking-wider">Настройка Одноклассников</h4>
-                  <p className="text-xs text-orange-700">1. Оставьте заявку на <a href="https://apiok.ru" target="_blank" className="underline">apiok.ru</a> или создайте приложение в настройках профиля.</p>
+                  <p className="text-xs text-orange-700">1. Оставьте заявку на <a href="https://apiok.ru" target="_blank" rel="noopener noreferrer" className="underline">apiok.ru</a> или создайте приложение в настройках профиля.</p>
                   <p className="text-xs text-orange-700">2. Вам понадобятся: <strong>ID приложения</strong>, <strong>Секретный ключ</strong> и <strong>Публичный ключ</strong>.</p>
-                  <p className="text-xs text-orange-700">3. Redirect URI в настройках OK:<br/><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/ok/callback</code></p>
+                  <p className="text-xs text-orange-700">3. Redirect URI в настройках OK:<br /><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/ok/callback</code></p>
                 </div>
 
                 <div className="bg-orange-600/5 border border-orange-200 rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-orange-700 text-xs uppercase tracking-wider">Настройка TenChat</h4>
                   <p className="text-xs text-orange-600">1. Запросите доступ к API у поддержки TenChat.</p>
-                  <p className="text-xs text-orange-600">2. Укажите Redirect URI:<br/><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/tenchat/callback</code></p>
+                  <p className="text-xs text-orange-600">2. Укажите Redirect URI:<br /><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/tenchat/callback</code></p>
                 </div>
 
                 <div className="bg-black/5 border border-gray-300 rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-gray-900 text-xs uppercase tracking-wider">Настройка Twitter (X)</h4>
-                  <p className="text-xs text-gray-800">1. Зайдите на <a href="https://developer.x.com" target="_blank" className="underline">X Developer Portal</a>.</p>
+                  <p className="text-xs text-gray-800">1. Зайдите на <a href="https://developer.x.com" target="_blank" rel="noopener noreferrer" className="underline">X Developer Portal</a>.</p>
                   <p className="text-xs text-gray-800">2. Включите <strong>OAuth 2.0 PKCE</strong> и укажите тип приложения "Web App".</p>
-                  <p className="text-xs text-gray-800">3. Redirect URI:<br/><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/twitter/callback</code></p>
+                  <p className="text-xs text-gray-800">3. Redirect URI:<br /><code className="bg-white/50 px-1">https://your-app.railway.app/api/auth/twitter/callback</code></p>
                 </div>
 
                 <Alert type="warning">

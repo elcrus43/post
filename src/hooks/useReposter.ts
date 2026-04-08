@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import { useStore } from '../store/useStore';
 import { RepostRule, RepostHistoryItem } from '../types';
 import toast from 'react-hot-toast';
@@ -21,16 +22,16 @@ async function fetchRSS(url: string): Promise<Array<{ id: string; title: string;
     const enclosure = item.querySelector('enclosure');
     const mediaContent = item.querySelector('content');
     const image = enclosure?.getAttribute('url') || mediaContent?.getAttribute('url') || extractImageFromHtml(description);
-    // Clean HTML from description
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = description;
-    const cleanText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+    // Clean HTML from description safely (FIX #10: XSS protection)
+    const cleanText = description.trim();
     return { id: guid, title, text: title + (cleanText ? '\n\n' + cleanText : ''), image: image || undefined, link, pubDate };
   });
 }
 
 function extractImageFromHtml(html: string): string | null {
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  // FIX #10: Санитизация HTML перед извлечением изображений
+  const cleanHtml = DOMPurify.sanitize(html);
+  const match = cleanHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
   return match ? match[1] : null;
 }
 
