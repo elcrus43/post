@@ -287,7 +287,7 @@ const OAuthState = mongoose.model('OAuthState', OAuthStateSchema);
 // Middleware для защиты доступа (только для ПОЛЬЗОВАТЕЛЯ)
 const authMiddleware = (req, res, next) => {
   const token = req.cookies.app_token;
-  const publicPaths = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter'];
+  const publicPaths = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter', '/health', '/ready'];
 
   // Если это публичный путь, разрешаем
   if (publicPaths.some(p => req.path.startsWith(p))) {
