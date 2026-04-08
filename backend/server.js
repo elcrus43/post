@@ -1598,15 +1598,51 @@ app.get('/api/test/trigger', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 console.log('\n🚀 Starting server...');
 console.log(`📡 Port: ${PORT}`);
+console.log(`🌐 Host: ${HOST}`);
 console.log(`🔐 Auth: ${APP_PASSWORD ? '✅ Enabled' : '⚠️ DISABLED (set APP_PASSWORD!)'}`);
 console.log(`🗄️  MongoDB: ${process.env.MONGO_URI ? '✅ Configured' : '⚠️ Not configured'}`);
 console.log(`🌐 CORS Origins: ${allowedOrigins.join(', ') || '⚠️ None configured'}`);
+console.log(`🔧 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📦 FRONTEND_URL: ${process.env.FRONTEND_URL || 'not set'}`);
+console.log(`💾 ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? 'set' : 'MISSING'}`);
 console.log('');
 
-app.listen(PORT, () => console.log(`🚀 Server is listening on port ${PORT}`));
+// Keep server alive for Railway
+const server = app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server is listening on ${HOST}:${PORT}`);
+
+  // Keep process alive - prevent Railway from thinking we're done
+  setInterval(() => { }, 30000);
+});
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('❌ Server error:', err);
+  process.exit(1);
+});
+
+// Prevent unhandled rejections from crashing
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('🚨 Uncaught Exception:', err);
+});
+
+// Health check endpoints
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.get('/ready', (req, res) => {
+  const isReady = mongoose.connection.readyState === 1;
+  res.status(isReady ? 200 : 503).send(isReady ? 'Ready' : 'Not Ready');
+});
 
 // Все остальные GET-запросы отправляют index.html (для React Router)
 // ВАЖНО: Это должно быть в самом конце!
