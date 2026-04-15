@@ -1,0 +1,30 @@
+wing: automated_social_media_posting
+rooms:
+- name: backend
+  description: Files from backend/
+  keywords:
+  - backend
+  - backend
+- name: memory
+  description: Files from memory/
+  keywords:
+  - memory
+  - memory
+- name: src
+  description: Files from src/
+  keywords:
+  - src
+  - src
+- name: frontend
+  description: Files from components/
+  keywords:
+  - frontend
+  - components
+- name: scripts
+  description: Files from utils/
+  keywords:
+  - scripts
+  - utils
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useStore } from '../store/useStore';
-import { RepostRule, RepostHistoryItem } from '../types';
+import { RepostRule, RepostHistoryItem, MediaFile } from '../types';
+import { publishToAccount as apiPublish } from '../services/apiService';
 import toast from 'react-hot-toast';
 
 // ── RSS Parser ────────────────────────────────────────────────────────────────
@@ -73,44 +74,7 @@ async function fetchTGChannel(username: string): Promise<Array<{ id: string; tex
 }
 
 // ── Publish to account ────────────────────────────────────────────────────────
-async function publishToAccount(
-  account: any,
-  text: string,
-): Promise<{ status: 'success' | 'error'; postUrl?: string; error?: string }> {
-  try {
-    if (account.platform === 'telegram') {
-      const res = await fetch(`https://api.telegram.org/bot${account.tgBotToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: account.tgChatId, text, parse_mode: 'HTML' }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        return { status: 'success', postUrl: `https://t.me/c/${account.tgChatId}` };
-      }
-      return { status: 'error', error: data.description };
-    }
-
-    if (account.platform === 'vk') {
-      const params = new URLSearchParams({
-        owner_id: account.vkOwnerId,
-        message: text,
-        access_token: account.vkToken,
-        v: '5.131',
-      });
-      const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(`https://api.vk.com/method/wall.post?${params}`)}`);
-      const data = await res.json();
-      if (data.response?.post_id) {
-        return { status: 'success', postUrl: `https://vk.com/wall${account.vkOwnerId}_${data.response.post_id}` };
-      }
-      return { status: 'error', error: data.error?.error_msg || 'VK error' };
-    }
-
-    return { status: 'error', error: 'Платформа не поддерживается' };
-  } catch (e: any) {
-    return { status: 'error', error: e.message };
-  }
-}
+// Local simplified publish removed in favor of apiService.ts version
 
 // ── Check if should publish now ───────────────────────────────────────────────
 function shouldPublishNow(rule: RepostRule): boolean {
@@ -224,7 +188,22 @@ export function useReposter() {
           const results: RepostHistoryItem['results'] = [];
 
           for (const acc of targetAccounts) {
-            const result = await publishToAccount(acc, finalText);
+            // Use the full apiPublish to handle media and backend proxy
+            const result = await apiPublish(acc, {
+              id: 'temp',
+              text: finalText,
+              media: candidate.image ? [{ 
+                id: crypto.randomUUID(), 
+                url: candidate.image, 
+                type: 'image',
+                name: 'repost_media.jpg',
+                size: 0
+              } as MediaFile] : [],
+              targetAccounts: [acc.id],
+              status: 'draft',
+              createdAt: new Date().toISOString(),
+              results: []
+            });
             results.push({ accountId: acc.id, platform: acc.platform, ...result });
           }
 
@@ -264,5 +243,5 @@ export function useReposter() {
     check();
     const interval = setInterval(check, 60_000); // Каждую минуту
     return () => clearInterval(interval);
-  }, [repostRules, accounts]);
+  }, []); // use [] — state is read via getState() inside the interval
 }

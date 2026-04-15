@@ -284,7 +284,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
   // Publish
   app.post('/api/publish/vk', async (req, res) => {
-    try { const { accountId, token, ownerId, message, attachments, media } = req.body; const pm = media || (attachments ? attachments.split(',').map(u => ({ type: 'image', url })) : []); res.json(await pub(accountId || { platform: 'vk', token, ownerId }, { text: message, media: pm })); }
+    try { const { accountId, token, ownerId, message, attachments, media } = req.body; const pm = media || (attachments ? attachments.split(',').filter(Boolean).map(u => ({ type: 'image', url: u.trim() })) : []); res.json(await pub(accountId || { platform: 'vk', token, ownerId }, { text: message, media: pm })); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
   app.post('/api/publish/vk/story', async (req, res) => {
@@ -324,6 +324,21 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
       res.json(r.data);
     } catch (e) { res.status(e.response?.status || 500).json({ error: { message: e.message } }); }
   });
+
+  // Retry helper
+  async function withRetry(fn, max = 3, delay = 1000) {
+    for (let i = 0; i < max; i++) {
+      try { return await fn(); }
+      catch (e) {
+        if (i === max - 1) throw e;
+        // Only retry on network errors or 5xx/429
+        const s = e.response?.status;
+        if (s && s < 500 && s !== 429) throw e; 
+        console.warn(`[Retry ${i+1}/${max}] failing:`, e.message);
+        await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
+      }
+    }
+  }
 
   // Publish helper
   async function pub(aid, content) {
@@ -370,15 +385,41 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.delete('/api/reposter/history', async (req, res) => { try { await RepostHistory.deleteMany({}); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
   // Worker
-  async function check() { const now = new Date(); const posts = await Post.find({ status: 'scheduled', scheduledAt: { $lte: now } }); for (const p of posts) { const results = []; for (const aid of p.targetAccounts) { try { const r = await pub(aid, { text: p.text, media: p.media }); results.push({ accountId: aid, ...r, publishedAt: new Date() }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message, publishedAt: new Date() }); } } p.status = results.every(r => r.status === 'error') ? 'error' : 'published'; p.results = results; await p.save(); } }
+  async function check() { 
+    const now = new Date(); 
+    const posts = await Post.find({ status: 'scheduled', scheduledAt: { $lte: now } }).limit(50); 
+    for (const p of posts) { 
+      const results = []; 
+      for (const aid of p.targetAccounts) { 
+        try { 
+          const r = await withRetry(() => pub(aid, { text: p.text, media: p.media })); 
+          results.push({ accountId: aid, ...r, publishedAt: new Date() }); 
+        } catch (e) { 
+          results.push({ accountId: aid, status: 'error', error: e.message, publishedAt: new Date() }); 
+        } 
+      } 
+      p.status = results.every(r => r.status === 'error') ? 'error' : 'published'; 
+      p.results = results; 
+      await p.save(); 
+    } 
+  }
   async function rssRule(rule) { try { const feed = await parser.parseURL(rule.source.url); const items = feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); const item = items[0]; if (!item) return; const uid = item.guid || item.link; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; const text = item.contentSnippet || item.content || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; let pt = `${item.title}\n\n${text}`; if (rule.addSourceLink) pt += `\n\n🔗 ${item.link}`; if (rule.appendText) pt += `\n\n${rule.appendText}`; const media = []; if (item.enclosure?.url) media.push({ url: item.enclosure.url, type: 'image' }); else { const m = (item.content || '').match(/<img[^>]+src="([^">]+)"/); if (m) media.push({ url: m[1], type: 'image' }); } const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text: pt, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text: pt, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { } }
   async function tgRule(rule) { const u = rule.source.tgUsername.replace('@', ''); const o = rule.source.url; rule.source.url = `https://rsshub.app/telegram/channel/${u}`; await rssRule(rule); rule.source.url = o; }
-  async function vkRule(rule) { try { const oid = rule.source.vkOwnerId; let token = rule.source.vkToken; if (!token) { const a = await Account.findOne({ platform: 'vk', isActive: true }); if (a) token = dec(a.encryptedToken); } if (!token) throw new Error('No token'); const r = await axios.get('https://api.vk.ru/method/wall.get', { params: { owner_id: oid, count: 5, access_token: token, v: '5.199' } }); if (r.data.error) throw new Error(r.data.error.error_msg); const items = r.data.response.items; if (!items?.length) return; const item = items.find(i => !i.is_pinned) || items[0]; const uid = `vk_${oid}_${item.id}`; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; let text = item.text || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; const media = (item.attachments || []).filter(a => a.type === 'photo').map(a => ({ url: a.photo.sizes.slice(-1)[0].url, type: 'image' })); const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { } }
-  cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { } });
+  async function vkRule(rule) { try { const oid = rule.source.vkOwnerId; let token = rule.source.vkToken; if (!token) { const a = await Account.findOne({ platform: 'vk', isActive: true }); if (a) token = dec(a.encryptedToken); } if (!token) throw new Error('No token'); const r = await axios.get('https://api.vk.ru/method/wall.get', { params: { owner_id: oid, count: 5, access_token: token, v: '5.199' } }); if (r.data.error) throw new Error(r.data.error.error_msg); const items = r.data.response.items; if (!items?.length) return; const item = items.find(i => !i.is_pinned) || items[0]; const uid = `vk_${oid}_${item.id}`; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; let text = item.text || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; const media = (item.attachments || []).filter(a => a.type === 'photo').map(a => ({ url: a.photo.sizes.slice(-1)[0].url, type: 'image' })); const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { console.error('[vkRule] Error processing rule', rule.name, ':', e.message); } }
+  cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { console.error('[cron] Unexpected error:', e.message); } });
 
   // Test
   app.get('/api/test/trigger', async (req, res) => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.get('/api/test/telegram', async (req, res) => { try { const { token } = req.query; if (!token) return res.status(400).json({ error: 'Missing' }); const r = await axios.get(`https://api.telegram.org/bot${token}/getMe`); if (r.data.ok) return res.json({ ok: true, name: r.data.result.username }); res.status(400).json({ error: r.data.description }); } catch (e) { res.status(500).json({ error: 'TG error' }); } });
+
+  app.get('/api/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      time: new Date().toISOString()
+    });
+  });
 
   // MongoDB
   if (process.env.MONGO_URI) { mongoose.connect(process.env.MONGO_URI).then(() => console.log('✅ Mongo')).catch(e => console.error('❌ Mongo:', e.message)); }
@@ -390,6 +431,9 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   console.log('\n🚀 App ready!');
   console.log(`📡 ${HOST}:${PORT}`);
   console.log(`🔐 ${APP_PASSWORD ? '✅' : '⚠️'}`);
+  if (APP_PASSWORD === 'changeme_or_configure_env') {
+    console.log('   !!! WARNING: Using default insecure password !!!');
+  }
   console.log(`🗄️ ${process.env.MONGO_URI ? '✅' : '⚠️'}`);
 
   // Catch-all

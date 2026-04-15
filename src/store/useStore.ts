@@ -23,8 +23,10 @@ interface AppStore {
   // AI Assistant Config
   aiBaseUrl: string;
   aiModel: string;
+  aiApiKey: string;
   setAiBaseUrl: (url: string) => void;
   setAiModel: (model: string) => void;
+  setAiApiKey: (key: string) => void;
 
   addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => void;
   updateAccount: (id: string, updates: Partial<Account>) => void;
@@ -77,9 +79,21 @@ export const useStore = create<AppStore>()(
       isAuthorized: typeof document !== 'undefined' ? document.cookie.includes('app_token=') : false,
       aiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
       aiModel: 'gemini-1.5-flash',
+      aiApiKey: typeof window !== 'undefined'
+        ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('dashscope_api_key') || localStorage.getItem('openai_api_key') || '')
+        : '',
 
       setAiBaseUrl: (url) => set({ aiBaseUrl: url }),
       setAiModel: (model) => set({ aiModel: model }),
+      setAiApiKey: (key) => {
+        // Migrate: remove legacy localStorage keys
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('gemini_api_key');
+          localStorage.removeItem('dashscope_api_key');
+          localStorage.removeItem('openai_api_key');
+        }
+        set({ aiApiKey: key });
+      },
 
       syncData: async () => {
         const { useBackend, backendUrl } = get();
@@ -213,7 +227,8 @@ export const useStore = create<AppStore>()(
 
       updatePost: async (id, updates) => {
         const { useBackend, backendUrl } = get();
-        if (useBackend && backendUrl && id.length > 20) { // Check if it's a MongoDB ID
+        const isMongoId = /^[a-f\d]{24}$/i.test(id);
+        if (useBackend && backendUrl && isMongoId) { // Check if it's a MongoDB ObjectId
           const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
             await fetch(`${baseUrl}/api/posts/${id}`, {
@@ -233,7 +248,8 @@ export const useStore = create<AppStore>()(
 
       removePost: async (id) => {
         const { useBackend, backendUrl } = get();
-        if (useBackend && backendUrl && id.length > 20) {
+        const isMongoId = /^[a-f\d]{24}$/i.test(id);
+        if (useBackend && backendUrl && isMongoId) {
           const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
             await fetch(`${baseUrl}/api/posts/${id}`, { 
@@ -289,7 +305,8 @@ export const useStore = create<AppStore>()(
 
       updateRepostRule: async (id, updates) => {
         const { useBackend, backendUrl } = get();
-        if (useBackend && backendUrl && id.length > 20) {
+        const isMongoId = /^[a-f\d]{24}$/i.test(id);
+        if (useBackend && backendUrl && isMongoId) {
           const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
             await fetch(`${baseUrl}/api/reposter/rules/${id}`, {
@@ -309,7 +326,8 @@ export const useStore = create<AppStore>()(
 
       removeRepostRule: async (id) => {
         const { useBackend, backendUrl } = get();
-        if (useBackend && backendUrl && id.length > 20) {
+        const isMongoId = /^[a-f\d]{24}$/i.test(id);
+        if (useBackend && backendUrl && isMongoId) {
           const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
           try {
             await fetch(`${baseUrl}/api/reposter/rules/${id}`, { 

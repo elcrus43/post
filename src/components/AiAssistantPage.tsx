@@ -210,17 +210,16 @@ export default function AiAssistantPage() {
     setAiBaseUrl, 
     aiModel, 
     setAiModel,
+    aiApiKey,
+    setAiApiKey,
     useBackend,
     backendUrl
   } = useStore();
 
-  // API Key state
-  const [apiKey, setApiKey] = useState(() => {
-    // Migration: prefer gemini/google key names if found
-    return localStorage.getItem('gemini_api_key') || localStorage.getItem('dashscope_api_key') || localStorage.getItem('openai_api_key') || '';
-  });
+  // API Key state — теперь из Zustand store (не localStorage)
+  const apiKey = aiApiKey;
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [showKeySetup, setShowKeySetup] = useState(() => !localStorage.getItem('gemini_api_key'));
+  const [showKeySetup, setShowKeySetup] = useState(() => !aiApiKey);
   const [showApiSettings, setShowApiSettings] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
@@ -266,17 +265,14 @@ export default function AiAssistantPage() {
       toast.error('Введите API ключ');
       return;
     }
-    localStorage.setItem('gemini_api_key', apiKeyInput);
-    setApiKey(apiKeyInput);
+    setAiApiKey(apiKeyInput);
+    setApiKeyInput('');
     setShowKeySetup(false);
     toast.success('Gemini API ключ сохранён!');
   };
 
   const clearApiKey = () => {
-    localStorage.removeItem('gemini_api_key');
-    localStorage.removeItem('dashscope_api_key');
-    localStorage.removeItem('openai_api_key');
-    setApiKey('');
+    setAiApiKey('');
     setApiKeyInput('');
     setShowKeySetup(true);
   };
