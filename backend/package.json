@@ -1,6 +1,7 @@
 {
   "name": "autopost-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Secure proxy server for social media posting",
   "main": "server.js",
   "scripts": {
