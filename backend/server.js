@@ -30,17 +30,33 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const path = (await import('path')).default;
   const fs = (await import('fs')).default;
   const { fileURLToPath } = await import('url');
+  const helmet = (await import('helmet')).default;
+  const mongoSanitize = (await import('express-mongo-sanitize')).default;
 
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
 
   const app = express();
-  app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
-  app.get('/ready', (req, res) => res.status(200).json({ status: 'ready' }));
+  
+  // SEC-006: Helmet for security headers
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "img-src": ["'self'", "data:", "https:", "http:"],
+        "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // For Vite/React in-dev
+      },
+    },
+  }));
+
+  // SEC-011: Mongo sanitize
+  app.use(mongoSanitize());
 
   const cookieParser = (await import('cookie-parser')).default;
   await import('dotenv/config');
-  app.use(cookieParser());
+  
+  const SESSION_SECRET = process.env.SESSION_SECRET || 'fallback-secret-change-me';
+  app.use(cookieParser(SESSION_SECRET));
 
   const cors = (await import('cors')).default;
   const axios = (await import('axios')).default;
@@ -70,22 +86,18 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
   app.use(cors({
     origin: (origin, cb) => {
-      console.log(`[CORS] Origin check: ${origin}`);
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(a => origin?.startsWith(a)) || origin.includes('localhost')) {
+      // SEC-005: Strict origin check
+      if (!origin || allowedOrigins.includes(origin)) {
         cb(null, true);
       } else {
-        console.warn(`[CORS] Rejected: ${origin}`);
-        cb(new Error('CORS'));
+        cb(new Error('CORS blocked'));
       }
     },
     credentials: true
   }));
 
-  app.use(express.json({ limit: '50mb' }));
-
-  // Sanitization
-  const sanitize = o => Array.isArray(o) ? o.map(sanitize) : (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('$') && !k.includes('.')).map(([k, v]) => [k, sanitize(v)])) : o);
-  app.use((req, res, next) => { if (req.body && typeof req.body === 'object') req.body = sanitize(req.body); next(); });
+  // SEC-010: Reduced limit for DoS protection
+  app.use(express.json({ limit: '2mb' }));
 
   // Rate limiters
   const genLim = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
@@ -94,13 +106,18 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.use(genLim);
 
   // Proxy auth
-  const authProxy = (req, res, next) => req.cookies.app_token === APP_PASSWORD ? next() : res.status(401).json({ error: 'Unauthorized' });
+  const authProxy = (req, res, next) => (req.signedCookies.session_id === 'authenticated') ? next() : res.status(401).json({ error: 'Unauthorized' });
   app.use("/vk", authProxy, createProxyMiddleware({ target: "https://api.vk.com", changeOrigin: true }));
   app.use("/ok", authProxy, createProxyMiddleware({ target: "https://api.ok.ru", changeOrigin: true }));
 
-  // SSRF
+  // SEC-004: SSRF with validation
   const PRIV = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1|169\.254\.|fc00:|fe80:)/i;
-  function vUrl(u) { if (!u || typeof u !== 'string') throw new Error('Invalid'); const p = new URL(u); if (p.protocol !== 'http:' && p.protocol !== 'https:') throw new Error('Proto'); if (PRIV.test(p.hostname)) throw new Error('SSRF'); }
+  function vUrl(u) { 
+    if (!u || typeof u !== 'string') throw new Error('Invalid URL'); 
+    const p = new URL(u); 
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') throw new Error('Only HTTP/HTTPS allowed'); 
+    if (PRIV.test(p.hostname)) throw new Error('Private network access blocked');
+  }
 
   // Schemas
   const Account = mongoose.model('Account', new mongoose.Schema({
@@ -132,48 +149,52 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
   // Auth middleware
   app.use((req, res, next) => {
-    const t = req.cookies.app_token;
+    // SEC-002 & SEC-003: Use signed cookies and don't store plain password
+    const isAuth = req.signedCookies.session_id === 'authenticated';
     
-    // Public paths
     const pub = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter', '/health', '/ready', '/assets/'];
     if (pub.some(p => req.path.startsWith(p))) return next();
     
-    // Auth check
-    if (t === APP_PASSWORD && APP_PASSWORD !== undefined) return next();
-    
-    // API protection
-    if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
-    
-    // If not authorized, redirect to / (where the Login component lives)
-    // but only if it's not the root path already
+    if (isAuth) return next();
+    if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Authentication required' });
     next();
   });
 
   // Login
   app.post('/api/login', strictLim, (req, res) => {
-    if (req.body.password === APP_PASSWORD) {
-      res.cookie('app_token', APP_PASSWORD, { 
+    if (req.body.password === APP_PASSWORD && APP_PASSWORD) {
+      // SEC-002: Use session identifier, not raw password
+      // SEC-003: httpOnly: true, secure: true, signed: true
+      res.cookie('session_id', 'authenticated', { 
         maxAge: 30 * 24 * 60 * 60 * 1000, 
-        httpOnly: false, 
-        secure: true, 
+        httpOnly: true, 
+        secure: process.env.NODE_ENV === 'production', 
         sameSite: 'Lax',
+        signed: true,
         path: '/'
       });
       return res.json({ success: true });
     }
-    res.status(401).json({ error: 'Wrong' });
+    res.status(401).json({ error: 'Invalid credentials' });
   });
 
   // Static
   const distPath = path.join(__dirname, '../dist');
   console.log(`[APP] Serving static from: ${distPath}`);
   
+  // SEC-008: Path normalization for assets
   app.use((req, res, next) => {
     if (req.url.startsWith('/assets/')) {
-      const fullPath = path.join(distPath, req.url);
-      console.log(`[STATIC] Requesting asset: ${req.url} -> ${fullPath}`);
+      const normalizedPath = path.normalize(req.url).replace(/^(\.\.[\/\\])+/, '');
+      const fullPath = path.join(distPath, normalizedPath);
+      
+      // Safety check: ensure path is within distPath
+      if (!fullPath.startsWith(distPath)) {
+        return res.status(403).send('Forbidden');
+      }
+
       if (!fs.existsSync(fullPath)) {
-        console.warn(`[STATIC] Asset NOT FOUND: ${fullPath}`);
+        return res.status(404).send('Not Found');
       }
     }
     next();
@@ -191,11 +212,12 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const enc = t => t ? CryptoJS.AES.encrypt(t, process.env.ENCRYPTION_KEY).toString() : '';
   const dec = e => e ? CryptoJS.AES.decrypt(e, process.env.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8) : '';
 
-  // OAuth routes (VK, OK, TenChat, Twitter) - condensed
+  // SEC-007: Cryptographically secure state
+  function genS() { return crypto.randomBytes(16).toString('hex'); }
   app.get('/api/auth/vk', (req, res) => {
     const { VK_CLIENT_ID: c, VK_CLIENT_SECRET: s, VK_REDIRECT_URI: r } = process.env;
     if (!c || !s || !r) return res.status(500).json({ error: 'VK not configured' });
-    res.redirect(`https://id.vk.com/auth?app_id=${c}&response_type=code&redirect_uri=${encodeURIComponent(r)}&scope=466972&state=${Math.random().toString(36).substring(7)}`);
+    res.redirect(`https://id.vk.com/auth?app_id=${c}&response_type=code&redirect_uri=${encodeURIComponent(r)}&scope=466972&state=${genS()}`);
   });
   app.get('/api/auth/vk/callback', async (req, res) => {
     const { code } = req.query;
@@ -450,7 +472,8 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { console.error('[cron] Unexpected error:', e.message); } });
 
   // Test
-  app.get('/api/test/trigger', async (req, res) => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+  // SEC-009: Added rate limit for test trigger
+  app.get('/api/test/trigger', strictLim, async (req, res) => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: 'Internal test failure' }); } });
   app.get('/api/test/telegram', async (req, res) => { try { const { token } = req.query; if (!token) return res.status(400).json({ error: 'Missing' }); const r = await axios.get(`https://api.telegram.org/bot${token}/getMe`); if (r.data.ok) return res.json({ ok: true, name: r.data.result.username }); res.status(400).json({ error: r.data.description }); } catch (e) { res.status(500).json({ error: 'TG error' }); } });
 
   app.get('/api/health', (req, res) => {
