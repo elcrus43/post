@@ -37,6 +37,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const __dirname = path.dirname(__filename);
 
   const app = express();
+  app.set('trust proxy', 1);
   
   // SEC-006: Helmet for security headers
   app.use(helmet({
