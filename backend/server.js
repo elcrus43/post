@@ -81,7 +81,9 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
     'http://localhost:3000',
     'http://localhost:5173',
     'http://localhost:4173',
-    'https://post-production-01fa.up.railway.app'
+    'https://post-production-01fa.up.railway.app',
+    'https://post-73a3.onrender.com',
+    'https://*.onrender.com'
   ].filter(Boolean);
 
   app.use(cors({
