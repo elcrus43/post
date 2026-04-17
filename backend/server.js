@@ -61,6 +61,8 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const allowedOrigins = [
     process.env.FRONTEND_URL,
     process.env.RAILWAY_STATIC_URL,
+    process.env.PUBLIC_URL,
+    'http://localhost:3000',
     'http://localhost:5173',
     'http://localhost:4173',
     'https://post-production-01fa.up.railway.app'
@@ -68,8 +70,13 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
   app.use(cors({
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(a => origin?.startsWith(a))) cb(null, true);
-      else cb(new Error('CORS'));
+      console.log(`[CORS] Origin check: ${origin}`);
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(a => origin?.startsWith(a)) || origin.includes('localhost')) {
+        cb(null, true);
+      } else {
+        console.warn(`[CORS] Rejected: ${origin}`);
+        cb(new Error('CORS'));
+      }
     },
     credentials: true
   }));
@@ -126,17 +133,32 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   // Auth middleware
   app.use((req, res, next) => {
     const t = req.cookies.app_token;
-    const pub = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter'];
+    
+    // Public paths
+    const pub = ['/api/login', '/login', '/api/auth/', '/favicon.ico', '/api/auth/tenchat', '/api/auth/twitter', '/health', '/ready', '/assets/'];
     if (pub.some(p => req.path.startsWith(p))) return next();
-    if (t === APP_PASSWORD) return next();
+    
+    // Auth check
+    if (t === APP_PASSWORD && APP_PASSWORD !== undefined) return next();
+    
+    // API protection
     if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+    
+    // If not authorized, redirect to / (where the Login component lives)
+    // but only if it's not the root path already
     next();
   });
 
   // Login
   app.post('/api/login', strictLim, (req, res) => {
     if (req.body.password === APP_PASSWORD) {
-      res.cookie('app_token', APP_PASSWORD, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax' });
+      res.cookie('app_token', APP_PASSWORD, { 
+        maxAge: 30 * 24 * 60 * 60 * 1000, 
+        httpOnly: false, 
+        secure: true, 
+        sameSite: 'Lax',
+        path: '/'
+      });
       return res.json({ success: true });
     }
     res.status(401).json({ error: 'Wrong' });
@@ -144,7 +166,26 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
   // Static
   const distPath = path.join(__dirname, '../dist');
-  app.use(express.static(distPath));
+  console.log(`[APP] Serving static from: ${distPath}`);
+  
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/assets/')) {
+      const fullPath = path.join(distPath, req.url);
+      console.log(`[STATIC] Requesting asset: ${req.url} -> ${fullPath}`);
+      if (!fs.existsSync(fullPath)) {
+        console.warn(`[STATIC] Asset NOT FOUND: ${fullPath}`);
+      }
+    }
+    next();
+  });
+
+  app.use(express.static(distPath, {
+    setHeaders: (res, path) => {
+      if (path.includes('/assets/')) {
+        console.log(`[STATIC] Sending asset: ${path}`);
+      }
+    }
+  }));
 
   // Crypto
   const enc = t => t ? CryptoJS.AES.encrypt(t, process.env.ENCRYPTION_KEY).toString() : '';

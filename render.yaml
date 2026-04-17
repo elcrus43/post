@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: autopost-app
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node backend/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGO_URI
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: VK_TOKEN
+        sync: false
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: OK_TOKEN
+        sync: false
+      - key: OK_APP_KEY
+        sync: false
+      - key: OK_APP_SECRET_KEY
+        sync: false
+      - key: TWITTER_API_KEY
+        sync: false
+      - key: TWITTER_API_SECRET
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN
+        sync: false
+      - key: TWITTER_ACCESS_SECRET
+        sync: false
+      - key: TENCHAT_TOKEN
+        sync: false

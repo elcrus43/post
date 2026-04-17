@@ -8,8 +8,10 @@
 - **Build Status**: Verified successful on 2026-04-16
 
 ## Endpoints
-- **Frontend**: http://localhost:5173
-- **Backend**: http://localhost:3000
+- **Local Frontend**: http://localhost:5173
+- **Local Backend**: http://localhost:3000
+- **Production URL**: https://qwen-cloud-bot-production.up.railway.app
+- **Production Health**: https://qwen-cloud-bot-production.up.railway.app/api/health
 - **AI Proxy**: `/api/ai/proxy` added to backend for agentic support
 
 ## Security Baseline
