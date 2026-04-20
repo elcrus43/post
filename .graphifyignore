@@ -1,0 +1,9 @@
+﻿# Graphify ignore patterns
+node_modules/
+dist/
+.git/
+*.log
+.env
+package-lock.json
+backend/node_modules/
+backend/package-lock.json
