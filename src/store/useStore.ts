@@ -28,12 +28,12 @@ interface AppStore {
   setAiModel: (model: string) => void;
   setAiApiKey: (key: string) => void;
 
-  addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => void;
+  addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => Promise<boolean>;
   updateAccount: (id: string, updates: Partial<Account>) => void;
   removeAccount: (id: string) => void;
   toggleAccount: (id: string) => void;
 
-  addPost: (post: Omit<Post, 'id' | 'createdAt' | 'results'>) => void;
+  addPost: (post: Omit<Post, 'id' | 'createdAt' | 'results'>) => Promise<void>;
   updatePost: (id: string, updates: Partial<Post>) => void;
   removePost: (id: string) => void;
   updatePostResult: (postId: string, result: PostResult) => void;
@@ -63,6 +63,14 @@ interface AppStore {
   syncData: () => Promise<void>;
   setBackendConfig: (url: string | null, enabled: boolean) => void;
 }
+
+const normalizeAccount = (raw: any): Account => ({
+  ...raw,
+  id: String(raw?.id ?? raw?._id ?? crypto.randomUUID()),
+  type: raw?.type || 'personal',
+  isActive: typeof raw?.isActive === 'boolean' ? raw.isActive : true,
+  createdAt: raw?.createdAt || new Date().toISOString(),
+});
 
 export const useStore = create<AppStore>()(
   persist(
@@ -111,10 +119,30 @@ export const useStore = create<AppStore>()(
             fetch(`${baseUrl}/api/reposter/history`, fetchOpts),
           ]);
 
-          if (accRes.ok) set({ accounts: await accRes.json() });
-          if (postRes.ok) set({ posts: await postRes.json() });
-          if (ruleRes.ok) set({ repostRules: await ruleRes.json() });
-          if (historyRes.ok) set({ repostHistory: await historyRes.json() });
+          if (accRes.ok) {
+            const data = await accRes.json();
+            if (Array.isArray(data)) {
+              set({ accounts: data.map(normalizeAccount) });
+            }
+          }
+          if (postRes.ok) {
+            const data = await postRes.json();
+            if (Array.isArray(data)) {
+              set({ posts: data });
+            }
+          }
+          if (ruleRes.ok) {
+            const data = await ruleRes.json();
+            if (Array.isArray(data)) {
+              set({ repostRules: data });
+            }
+          }
+          if (historyRes.ok) {
+            const data = await historyRes.json();
+            if (Array.isArray(data)) {
+              set({ repostHistory: data });
+            }
+          }
         } catch (e) {
           console.error('Failed to sync data:', e);
         }
@@ -125,38 +153,44 @@ export const useStore = create<AppStore>()(
 
         if (useBackend && backendUrl) {
           const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-          try {
-            const res = await fetch(`${baseUrl}/api/accounts`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                platform: account.platform,
-                name: account.name,
-                ownerId: account.vkOwnerId || account.tgChatId || account.okGroupId,
-                token: account.vkToken || account.tgBotToken || account.okToken,
-                okAppKey: account.okAppKey,
-                okAppSecretKey: account.okAppSecretKey,
-                okGroupId: account.okGroupId,
-              }),
-            });
-            if (res.ok) {
-              const newAcc = await res.json();
-              set((s) => ({ accounts: [...s.accounts, newAcc] }));
-              return;
-            }
-          } catch (e) {
-            console.error('Backend save failed:', e);
+          const res = await fetch(`${baseUrl}/api/accounts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              platform: account.platform,
+              name: account.name,
+              ownerId: account.vkOwnerId || account.tgChatId || account.okGroupId,
+              token: account.vkToken || account.tgBotToken || account.okToken,
+              okAppKey: account.okAppKey,
+              okAppSecretKey: account.okAppSecretKey,
+              okGroupId: account.okGroupId,
+            }),
+          });
+          if (!res.ok) {
+            let message = `HTTP ${res.status}`;
+            try {
+              const body = await res.json();
+              if (body?.error) message = body.error;
+            } catch {}
+            throw new Error(message);
           }
+          const newAcc = normalizeAccount(await res.json());
+          set((s) => ({
+            accounts: s.accounts.some((a) => a.id === newAcc.id) ? s.accounts : [...s.accounts, newAcc]
+          }));
+          await get().syncData();
+          return true;
         }
 
-        // Fallback to local if backend fails or disabled
+        // Local mode only when backend is disabled
         const newAccount: Account = {
           ...account,
           id: crypto.randomUUID(),
           createdAt: new Date().toISOString(),
         };
         set((s) => ({ accounts: [...s.accounts, newAccount] }));
+        return true;
       },
 
       updateAccount: (id, updates) => {
@@ -454,17 +488,27 @@ export const useStore = create<AppStore>()(
         return rest;
       },
       migrate: (persistedState: any, version: number) => {
+        if (!persistedState) return persistedState;
+        const normalized = {
+          ...persistedState,
+          accounts: Array.isArray(persistedState.accounts) ? persistedState.accounts : [],
+          posts: Array.isArray(persistedState.posts) ? persistedState.posts : [],
+          repostRules: Array.isArray(persistedState.repostRules) ? persistedState.repostRules : [],
+          repostHistory: Array.isArray(persistedState.repostHistory) ? persistedState.repostHistory : [],
+          utmPresets: Array.isArray(persistedState.utmPresets) ? persistedState.utmPresets : [],
+          analyticsEntries: Array.isArray(persistedState.analyticsEntries) ? persistedState.analyticsEntries : [],
+        };
         if (version < 2 && persistedState) {
           const oldUrl = 'https://post-production-01fa.up.railway.app';
-          if (persistedState.backendUrl === oldUrl) {
+          if (normalized.backendUrl === oldUrl) {
             console.log('🚀 Migrating stale backend URL');
             return {
-              ...persistedState,
+              ...normalized,
               backendUrl: typeof window !== 'undefined' ? window.location.origin : oldUrl
             };
           }
         }
-        return persistedState;
+        return normalized;
       }
     }
   )

@@ -126,7 +126,7 @@ export default function ComposerPage() {
     }
 
     if (isScheduled) {
-      addPost({
+      await addPost({
         text: enrichedText,
         media,
         targetAccounts: selectedAccounts,
@@ -166,6 +166,9 @@ export default function ComposerPage() {
 
       const { posts } = useStore.getState();
       const post = posts[posts.length - 1];
+      if (!post) {
+        throw new Error('Post was not created');
+      }
 
       const targetAccs = accounts.filter((a) => selectedAccounts.includes(a.id));
       const results: PostResult[] = [];

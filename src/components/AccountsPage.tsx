@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Plus, Trash2, Power, ChevronDown, ChevronUp, Wifi, WifiOff, Loader2, ExternalLink } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { Account, Platform, AccountType } from '../types';
 import PlatformIcon from './PlatformIcon';
 import { cn } from '../utils/cn';
-import { testTelegramConnection, testVKConnection, testOKConnection } from '../services/apiService';
+import { testTelegramConnection, testTelegramAccountConnection, testVKConnection, testOKConnection } from '../services/apiService';
 import toast from 'react-hot-toast';
 
 const PLATFORM_LABELS: Record<Platform, string> = {
@@ -95,29 +95,33 @@ export default function AccountsPage() {
   const setField = (key: keyof FormState, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!form.name.trim()) { toast.error('Введите название аккаунта'); return; }
 
     const base = { platform: form.platform, type: form.type, name: form.name.trim(), isActive: true };
 
-    if (form.platform === 'vk') {
-      if (!form.vkToken || !form.vkOwnerId) { toast.error('Заполните токен VK и Owner ID'); return; }
-      addAccount({ ...base, vkToken: form.vkToken, vkOwnerId: form.vkOwnerId });
-    } else if (form.platform === 'ok') {
-      if (!form.okToken || !form.okAppKey || !form.okAppSecretKey) { toast.error('Заполните все поля Одноклассников'); return; }
-      addAccount({ ...base, okToken: form.okToken, okAppKey: form.okAppKey, okAppSecretKey: form.okAppSecretKey, okGroupId: form.okGroupId });
-    } else if (form.platform === 'telegram') {
-      if (!form.tgBotToken || !form.tgChatId) { toast.error('Заполните Bot Token и Chat ID'); return; }
-      addAccount({ ...base, tgBotToken: form.tgBotToken, tgChatId: form.tgChatId });
-    } else {
-      // Для TenChat и Twitter используем OAuth (добавление через редирект)
-      handleOAuth(form.platform);
-      return;
-    }
+    try {
+      if (form.platform === 'vk') {
+        if (!form.vkToken || !form.vkOwnerId) { toast.error('Заполните токен VK и Owner ID'); return; }
+        await addAccount({ ...base, vkToken: form.vkToken, vkOwnerId: form.vkOwnerId });
+      } else if (form.platform === 'ok') {
+        if (!form.okToken || !form.okAppKey || !form.okAppSecretKey) { toast.error('Заполните все поля Одноклассников'); return; }
+        await addAccount({ ...base, okToken: form.okToken, okAppKey: form.okAppKey, okAppSecretKey: form.okAppSecretKey, okGroupId: form.okGroupId });
+      } else if (form.platform === 'telegram') {
+        if (!form.tgBotToken || !form.tgChatId) { toast.error('Заполните Bot Token и Chat ID'); return; }
+        await addAccount({ ...base, tgBotToken: form.tgBotToken, tgChatId: form.tgChatId });
+      } else {
+        // Для TenChat и Twitter используем OAuth (добавление через редирект)
+        handleOAuth(form.platform);
+        return;
+      }
 
-    toast.success('Аккаунт добавлен!');
-    setForm(defaultForm);
-    setShowForm(false);
+      toast.success('Аккаунт добавлен!');
+      setForm(defaultForm);
+      setShowForm(false);
+    } catch (e: any) {
+      toast.error(`Не удалось сохранить аккаунт: ${e?.message || 'ошибка сервера'}`);
+    }
   };
 
   // Тест соединения из формы
@@ -151,6 +155,10 @@ export default function AccountsPage() {
     try {
       if (acc.platform === 'telegram' && acc.tgBotToken) {
         const r = await testTelegramConnection(acc.tgBotToken);
+        if (r.ok) toast.success(`✅ ${acc.name}: бот @${r.name} активен`);
+        else toast.error(`❌ ${acc.name}: ${r.error}`);
+      } else if (acc.platform === 'telegram') {
+        const r = await testTelegramAccountConnection(acc.id);
         if (r.ok) toast.success(`✅ ${acc.name}: бот @${r.name} активен`);
         else toast.error(`❌ ${acc.name}: ${r.error}`);
       } else if (acc.platform === 'vk' && acc.vkToken) {
@@ -279,22 +287,19 @@ export default function AccountsPage() {
 
           {/* VK */}
           {form.platform === 'vk' && (
-            <div className="space-y-4 mb-4">
-              <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex flex-col items-center text-center shadow-sm">
-                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white mb-4 shadow-lg">
-                  <PlatformIcon platform="vk" size={32} />
-                </div>
-                <h3 className="text-base font-bold text-blue-900 mb-2">Авторизация VK ID</h3>
-                <p className="text-sm text-blue-700 mb-6 max-w-sm">
-                  Нажмите кнопку ниже, чтобы безопасно подключить ваш аккаунт или группу через официальный сервис ВКонтакте.
-                </p>
-                <button
-                  onClick={() => handleOAuth('vk')}
-                  className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-3 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                >
-                  <ExternalLink size={18} />
-                  Войти через ВКонтакте
-                </button>
+            <div className="space-y-3 mb-4 bg-blue-50 p-4 rounded-xl border border-blue-100">
+              <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">VK API Token</h3>
+              <div>
+                <label className={labelCls}>Access Token</label>
+                <input className={inputCls} placeholder="vk1.a.ABCdefGHI..."
+                  value={form.vkToken} onChange={(e) => setField('vkToken', e.target.value)} />
+                <p className="text-xs text-gray-400 mt-1">олучить: https://oauth.vk.com/authorize?client_id=54556245&response_type=token</p>
+              </div>
+              <div>
+                <label className={labelCls}>Owner ID</label>
+                <input className={inputCls} placeholder="1850087"
+                  value={form.vkOwnerId} onChange={(e) => setField('vkOwnerId', e.target.value)} />
+                <p className="text-xs text-gray-400 mt-1">ля группы: положительный. ля пользователя: отрицательный</p>
               </div>
             </div>
           )}
@@ -392,9 +397,9 @@ export default function AccountsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {accounts.map((acc) => (
+          {accounts.map((acc, idx) => (
             <AccountCard
-              key={acc.id}
+              key={acc.id || `account-${idx}`}
               account={acc}
               expanded={expandedId === acc.id}
               testingId={testing}

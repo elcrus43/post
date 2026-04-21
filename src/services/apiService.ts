@@ -136,6 +136,22 @@ export async function testTelegramConnection(botToken: string): Promise<{ ok: bo
   }
 }
 
+export async function testTelegramAccountConnection(accountId: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  const { useBackend, backendUrl } = useStore.getState();
+  if (!useBackend || !backendUrl) {
+    return { ok: false, error: 'Требуется бэкенд для теста сохраненного аккаунта' };
+  }
+  try {
+    const res = await fetch(`${backendUrl}/api/test/telegram?accountId=${encodeURIComponent(accountId)}`, {
+      credentials: 'include',
+    });
+    const data = await res.json();
+    return data;
+  } catch {
+    return { ok: false, error: 'Ошибка бэкенд-прокси для Telegram' };
+  }
+}
+
 // ─── VK ───────────────────────────────────────────────────────────────────────
 async function postToVK(account: Account, post: Post): Promise<PostResult> {
   const base: PostResult = {
@@ -290,6 +306,8 @@ export async function testOKConnection(token: string, appKey: string, appSecret:
 // ─── Главная функция публикации ───────────────────────────────────────────────
 export async function publishToAccount(account: Account, post: Post): Promise<PostResult> {
   const { useBackend, backendUrl } = useStore.getState();
+  const media = Array.isArray(post?.media) ? post.media : [];
+  const text = post?.text || '';
 
   if (useBackend && backendUrl) {
     try {
@@ -319,10 +337,10 @@ export async function publishToAccount(account: Account, post: Post): Promise<Po
           
           // Передадим аккаунт целиком или необходимые поля
           accountId: account.id,
-          message: post.text,
-          text: post.text, // для TG
-          media: post.media, // ВАЖНО: передаем массив для обработки на бэкенде
-          attachments: post.media.map(m => m.url).join(','), // для обратной совместимости
+          message: text,
+          text, // для TG
+          media, // ВАЖНО: передаем массив для обработки на бэкенде
+          attachments: media.map(m => m.url).join(','), // для обратной совместимости
           
           token: account.platform === 'vk' ? account.vkToken : 
                  account.platform === 'ok' ? account.okToken : 

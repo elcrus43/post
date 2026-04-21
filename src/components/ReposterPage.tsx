@@ -668,7 +668,17 @@ function RuleCard({
 }) {
   const { accounts } = useStore();
   const [expanded, setExpanded] = useState(false);
-  const targets = accounts.filter((a) => rule.targetAccountIds.includes(a.id));
+  const ruleWithDefaults = {
+  source: { type: 'rss', name: '', url: '', ...rule.source },
+  schedule: { days: [], hours: [], intervalMin: 0, intervalMax: 0, ...rule.schedule },
+  filters: { minLength: 0, maxLength: 0, requireImage: false, stopWords: [], requiredWords: [], ...rule.filters },
+  targetAccountIds: [],
+  ...rule
+};
+
+
+
+  const targets = accounts.filter((a) => (ruleWithDefaults.targetAccountIds || []).includes(a.id));
 
   return (
     <div className={cn(
@@ -682,7 +692,7 @@ function RuleCard({
             'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
             rule.status === 'active' ? 'bg-emerald-100' : 'bg-gray-100'
           )}>
-            <SourceIcon type={rule.source.type} />
+            <SourceIcon type={ruleWithDefaults.source.type} />
           </div>
 
           <div className="flex-1 min-w-0">
@@ -691,7 +701,7 @@ function RuleCard({
               <StatusBadge status={rule.status} />
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-              <span>{rule.source.name || rule.source.url}</span>
+              <span>{ruleWithDefaults.source.name || ruleWithDefaults.source.url}</span>
               {rule.lastCheckedAt && (
                 <>
                   <span>·</span>
@@ -747,7 +757,7 @@ function RuleCard({
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Clock size={12} />
-            <span>{rule.schedule.days.length} дн./нед. · {rule.schedule.hours.length} часов</span>
+            <span>{ruleWithDefaults.schedule.days.length} дн./нед. · {ruleWithDefaults.schedule.hours.length} часов</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Settings2 size={12} />
@@ -778,16 +788,16 @@ function RuleCard({
         <div className="px-4 pb-4 border-t border-gray-50 pt-3 grid grid-cols-2 gap-3 text-xs">
           <div className="bg-gray-50 rounded-xl p-3">
             <div className="font-semibold text-gray-600 mb-2">📅 Расписание</div>
-            <div className="text-gray-500">Дни: {rule.schedule.days.map((d) => DAYS[d]).join(', ')}</div>
-            <div className="text-gray-500">Часы: {rule.schedule.hours.map((h) => `${h}:00`).join(', ')}</div>
-            <div className="text-gray-500">Интервал: {rule.schedule.intervalMin}-{rule.schedule.intervalMax} мин.</div>
+            <div className="text-gray-500">Дни: {ruleWithDefaults.schedule.days.map((d) => DAYS[d]).join(', ')}</div>
+            <div className="text-gray-500">Часы: {ruleWithDefaults.schedule.hours.map((h) => `${h}:00`).join(', ')}</div>
+            <div className="text-gray-500">Интервал: {ruleWithDefaults.schedule.intervalMin}-{ruleWithDefaults.schedule.intervalMax} мин.</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-3">
             <div className="font-semibold text-gray-600 mb-2">🔍 Фильтры</div>
-            {rule.filters.minLength > 0 && <div className="text-gray-500">Мин. длина: {rule.filters.minLength} симв.</div>}
-            {rule.filters.maxLength > 0 && <div className="text-gray-500">Макс. длина: {rule.filters.maxLength} симв.</div>}
-            {rule.filters.requireImage && <div className="text-gray-500">✓ Только с картинкой</div>}
-            {rule.filters.stopWords.length > 0 && <div className="text-gray-500">Стоп-слова: {rule.filters.stopWords.join(', ')}</div>}
+            {ruleWithDefaults.filters.minLength > 0 && <div className="text-gray-500">Мин. длина: {ruleWithDefaults.filters.minLength} симв.</div>}
+            {ruleWithDefaults.filters.maxLength > 0 && <div className="text-gray-500">Макс. длина: {ruleWithDefaults.filters.maxLength} симв.</div>}
+            {ruleWithDefaults.filters.requireImage && <div className="text-gray-500">✓ Только с картинкой</div>}
+            {ruleWithDefaults.filters.stopWords.length > 0 && <div className="text-gray-500">Стоп-слова: {ruleWithDefaults.filters.stopWords.join(', ')}</div>}
             {rule.skipDuplicates && <div className="text-gray-500">✓ Без дублей</div>}
             {rule.addSourceLink && <div className="text-gray-500">✓ Ссылка на источник</div>}
           </div>

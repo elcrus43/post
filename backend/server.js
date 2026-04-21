@@ -66,7 +66,9 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const multer = (await import('multer')).default;
   const { v2: cloudinary } = await import('cloudinary');
   const crypto = (await import('crypto')).default;
-  const mongoose = (await import('mongoose')).default;
+  const { createClient } = await import('@supabase/supabase-js');
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+  console.log('✅ Supabase initialized');
   const md5 = (await import('md5')).default;
   const FormData = (await import('form-data')).default;
   const { createProxyMiddleware } = await import('http-proxy-middleware');
@@ -106,8 +108,8 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.use(express.json({ limit: '2mb' }));
 
   // Rate limiters
-  const genLim = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
-  const strictLim = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+  const genLim = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+  const strictLim = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
   const aiLim = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
   app.use(genLim);
 
@@ -115,6 +117,9 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const authProxy = (req, res, next) => (req.signedCookies.session_id === 'authenticated') ? next() : res.status(401).json({ error: 'Unauthorized' });
   app.use("/vk", authProxy, createProxyMiddleware({ target: "https://api.vk.com", changeOrigin: true }));
   app.use("/ok", authProxy, createProxyMiddleware({ target: "https://api.ok.ru", changeOrigin: true }));
+  app.use("/tg", authProxy, createProxyMiddleware({ target: "https://api.telegram.org", changeOrigin: true }));
+  app.use("/tg", authProxy, createProxyMiddleware({ target: "https://api.telegram.org", changeOrigin: true }));
+  app.use("/tg", authProxy, createProxyMiddleware({ target: "https://api.telegram.org", changeOrigin: true }));
 
   // SEC-004: SSRF with validation
   const PRIV = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.0\.0\.0|::1|169\.254\.|fc00:|fe80:)/i;
@@ -125,34 +130,118 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
     if (PRIV.test(p.hostname)) throw new Error('Private network access blocked');
   }
 
-  // Schemas
-  const Account = mongoose.model('Account', new mongoose.Schema({
-    platform: String, name: String, encryptedToken: String, ownerId: String,
-    okAppKey: String, okAppSecretKey: String, okGroupId: String,
-    isActive: { type: Boolean, default: true }, createdAt: { type: Date, default: Date.now }
-  }));
-  const Post = mongoose.model('Post', new mongoose.Schema({
-    userId: String, text: String, media: Array, scheduledAt: Date,
-    status: { type: String, enum: ['scheduled', 'published', 'error', 'draft'], default: 'scheduled' },
-    targetAccounts: [String], results: [{ accountId: String, platform: String, status: String, postUrl: String, error: String, publishedAt: Date }],
-    createdAt: { type: Date, default: Date.now }
-  }));
-  const RepostRule = mongoose.model('RepostRule', new mongoose.Schema({
-    name: String, status: { type: String, enum: ['active', 'paused', 'error'], default: 'paused' },
-    source: { type: { type: String, enum: ['rss', 'vk_wall', 'tg_channel'] }, name: String, url: String, vkOwnerId: String, vkToken: String, tgUsername: String },
-    targetAccountIds: [String], schedule: { days: [Number], hours: [Number], intervalMin: Number, intervalMax: Number },
-    filters: { minLength: Number, maxLength: Number, requireImage: Boolean, stopWords: [String], requiredWords: [String] },
-    order: { type: String, enum: ['newest', 'oldest', 'random'], default: 'newest' }, appendText: String, addSourceLink: Boolean, skipDuplicates: Boolean,
-    lastCheckedAt: Date, nextPublishAt: Date, createdAt: { type: Date, default: Date.now }
-  }));
-  const RepostHistory = mongoose.model('RepostHistory', new mongoose.Schema({
-    ruleId: mongoose.Schema.Types.ObjectId, sourceUrl: { type: String, unique: true },
-    publishedAt: { type: Date, default: Date.now }, status: String, text: String, results: Array
-  }));
-  const OAuthState = mongoose.model('OAuthState', new mongoose.Schema({
-    state: String, codeVerifier: String, platform: String, createdAt: { type: Date, expires: '15m', default: Date.now }
-  }));
-
+  // Supabase helpers
+  const fromDb = row => {
+    if (!row) return null;
+    const out = {};
+    for (const [k, v] of Object.entries(row)) {
+      out[k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = v;
+    }
+    out._id = row.id;
+    return out;
+  };
+  const toDb = obj => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (k.startsWith('_') || k === 'id') continue;
+      if (typeof v === 'undefined') continue;
+      out[k.replace(/([A-Z])/g, '_$1').toLowerCase()] = v;
+    }
+    return out;
+  };
+  const makeModel = table => class {
+    static table = table;
+    constructor(d = {}) { Object.assign(this, d); }
+    static find(filter = {}) {
+      const self = this;
+      let query = supabase.from(table).select('*');
+      let _sortField = null, _sortAsc = true, _limit = null;
+      for (const [k, v] of Object.entries(filter || {})) {
+        const field = k.replace(/([A-Z])/g, '_$1').toLowerCase();
+        if (v && typeof v === 'object' && '$lte' in v) query = query.lte(field, v.$lte);
+        else if (v && typeof v === 'object' && '$lt' in v) query = query.lt(field, v.$lt);
+        else if (v && typeof v === 'object' && '$gte' in v) query = query.gte(field, v.$gte);
+        else if (v && typeof v === 'object' && '$gt' in v) query = query.gt(field, v.$gt);
+        else query = query.eq(field, v);
+      }
+      const builder = {
+        sort: (s) => {
+          const [sk, dir] = Object.entries(s)[0] || [];
+          if (sk) { _sortField = sk; _sortAsc = dir !== -1; }
+          return builder;
+        },
+        limit: (n) => { _limit = n; return builder; },
+        exec: async () => {
+          let q = query;
+          if (_sortField) q = q.order(_sortField.replace(/([A-Z])/g, '_$1').toLowerCase(), { ascending: _sortAsc });
+          if (_limit) q = q.limit(_limit);
+          const { data } = await q;
+          return (data || []).map(x => new self(fromDb(x)));
+        },
+        then: (resolve, reject) => builder.exec().then(resolve, reject),
+        catch: (reject) => builder.exec().catch(reject),
+        finally: (onFinally) => builder.exec().finally(onFinally)
+      };
+      return builder;
+    }
+    static async findOne(filter = {}) {
+      const rows = await this.find(filter).limit(1).exec();
+      return rows[0] || null;
+    }
+    static async findById(id) {
+      const { data } = await supabase.from(table).select('*').eq('id', id).single();
+      return data ? new this(fromDb(data)) : null;
+    }
+    static async findByIdAndDelete(id) {
+      await supabase.from(table).delete().eq('id', id);
+    }
+    static async findByIdAndUpdate(id, patch, opts = {}) {
+      const { data } = await supabase.from(table).update(toDb(patch)).eq('id', id).select().single();
+      if (!data) return null;
+      return opts.new ? new this(fromDb(data)) : null;
+    }
+    static async create(data) {
+      const doc = new this(data);
+      await doc.save();
+      return doc;
+    }
+    async save() {
+      const db = toDb(this);
+      if (this._id || this.id) {
+        const { data, error } = await supabase.from(this.constructor.table).update(db).eq('id', this._id || this.id).select().single();
+        if (error) {
+          console.error(`[Supabase:${this.constructor.table}] update failed`, {
+            id: this._id || this.id,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          });
+          throw new Error(error.message || 'Supabase update failed');
+        }
+        if (data) Object.assign(this, fromDb(data));
+      } else {
+        const { data, error } = await supabase.from(this.constructor.table).insert([db]).select().single();
+        if (error) {
+          console.error(`[Supabase:${this.constructor.table}] insert failed`, {
+            payload: db,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          });
+          throw new Error(error.message || 'Supabase insert failed');
+        }
+        if (data) Object.assign(this, fromDb(data));
+      }
+      return this;
+    }
+  };
+  const Account = makeModel('accounts');
+  const Post = makeModel('posts');
+  const RepostRule = makeModel('repost_rules');
+  const RepostHistory = makeModel('repost_history');
+  const OAuthState = makeModel('oauth_states');
   // Auth middleware
   app.use((req, res, next) => {
     // SEC-002 & SEC-003: Use signed cookies and don't store plain password
@@ -223,13 +312,13 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.get('/api/auth/vk', (req, res) => {
     const { VK_CLIENT_ID: c, VK_CLIENT_SECRET: s, VK_REDIRECT_URI: r } = process.env;
     if (!c || !s || !r) return res.status(500).json({ error: 'VK not configured' });
-    res.redirect(`https://id.vk.com/auth?app_id=${c}&response_type=code&redirect_uri=${encodeURIComponent(r)}&scope=466972&state=${genS()}`);
+    res.redirect(`https://oauth.vk.com/authorize?client_id=${c}&response_type=code&redirect_uri=${encodeURIComponent(r)}&display=page&v=5.199`);
   });
   app.get('/api/auth/vk/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.redirect(`${process.env.FRONTEND_URL || ''}/accounts?error=vk`);
     try {
-      const r = await axios.post('https://id.vk.com/oauth2/auth', null, { params: { grant_type: 'authorization_code', code, redirect_uri: process.env.VK_REDIRECT_URI, client_id: process.env.VK_CLIENT_ID, client_secret: process.env.VK_CLIENT_SECRET } });
+      const r = await axios.post('https://oauth.vk.com/access_token', null, { params: { grant_type: 'authorization_code', code, redirect_uri: process.env.VK_REDIRECT_URI, client_id: process.env.VK_CLIENT_ID, client_secret: process.env.VK_CLIENT_SECRET } });
       if (r.data.error) throw new Error(r.data.error_description || r.data.error);
       const { access_token, user_id } = r.data;
       const u = await axios.get('https://api.vk.com/method/users.get', { params: { access_token, v: '5.199', fields: 'photo_100' } });
@@ -333,7 +422,10 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
     try {
       const a = await Account.find().sort({ createdAt: -1 });
       res.json(a.map(x => ({ id: x._id, platform: x.platform, name: x.name, ownerId: x.ownerId, vkOwnerId: x.platform === 'vk' ? x.ownerId : undefined, tgChatId: x.platform === 'telegram' ? x.ownerId : undefined, okGroupId: x.platform === 'ok' ? x.okGroupId : undefined, okAppKey: x.platform === 'ok' ? x.okAppKey : undefined, isActive: x.isActive, createdAt: x.createdAt })));
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+      console.error('[API:/api/accounts] failed', e);
+      res.status(500).json({ error: e.message });
+    }
   });
   app.post('/api/accounts', async (req, res) => {
     try {
@@ -342,7 +434,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
       if (!platform || !name || !ft) return res.status(400).json({ error: 'Missing' });
       const a = new Account({ platform, name, ownerId: fo, encryptedToken: enc(ft), okAppKey, okAppSecretKey: okAppSecretKey ? enc(okAppSecretKey) : undefined, okGroupId });
       await a.save();
-      res.json({ id: a._id, platform, name, ownerId: fo, tgBotToken: ft, tgChatId: fo, isActive: a.isActive, createdAt: a.createdAt });
+      res.json({ id: a._id || a.id, platform, name, ownerId: fo, encryptedToken: a.encryptedToken, tgBotToken: ft, tgChatId: fo, okAppKey: a.okAppKey, okAppSecretKey: a.okAppSecretKey, okGroupId: a.okGroupId, isActive: a.isActive, createdAt: a.createdAt });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
   app.delete('/api/accounts/:id', async (req, res) => { try { await Account.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -412,7 +504,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   // Publish helper
   async function pub(aid, content) {
     let acc;
-    if (typeof aid === 'string' || mongoose.isValidObjectId(aid)) { acc = await Account.findById(aid); if (!acc || !acc.isActive) throw new Error('Not found'); } else acc = aid;
+    if (typeof aid === 'string') { acc = await Account.findById(aid); if (!acc || !acc.isActive) throw new Error('Not found'); } else acc = aid;
     const token = acc.encryptedToken ? dec(acc.encryptedToken) : acc.token;
     const { platform, ownerId } = acc;
     const text = content.text || content.message || '';
@@ -446,8 +538,8 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.delete('/api/posts/:id', async (req, res) => { try { await Post.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
   // Reposter
-  app.get('/api/reposter/rules', async (req, res) => { try { res.json(await RepostRule.find().sort({ createdAt: -1 })); } catch (e) { res.status(500).json({ error: e.message }); } });
-  app.post('/api/reposter/rules', async (req, res) => { try { const r = new RepostRule(req.body); await r.save(); res.json(r); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.get('/api/reposter/rules', async (req, res) => { try { const rules = await RepostRule.find().sort({ createdAt: -1 }); res.json(rules.map(r => ({ ...r, keywords: Array.isArray(r.keywords) ? r.keywords : [], excludeKeywords: Array.isArray(r.excludeKeywords) ? r.excludeKeywords : [] }))); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/reposter/rules', async (req, res) => { try { console.log('POST /api/reposter/rules:', JSON.stringify(req.body, null, 2)); const body = { ...req.body, keywords: Array.isArray(req.body.keywords) ? req.body.keywords : [], excludeKeywords: Array.isArray(req.body.excludeKeywords) ? req.body.excludeKeywords : [] }; const r = new RepostRule(body); await r.save(); res.json(r); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.patch('/api/reposter/rules/:id', async (req, res) => { try { res.json(await RepostRule.findByIdAndUpdate(req.params.id, req.body, { new: true })); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.delete('/api/reposter/rules/:id', async (req, res) => { try { await RepostRule.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.get('/api/reposter/history', async (req, res) => { try { res.json(await RepostHistory.find().sort({ publishedAt: -1 }).limit(100)); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -456,7 +548,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   // Worker
   async function check() { 
     const now = new Date(); 
-    const posts = await Post.find({ status: 'scheduled', scheduledAt: { $lte: now } }).limit(50); 
+    const posts = await Post.find({ status: 'scheduled', scheduledAt: { $lte: now } }).limit(50).exec(); 
     for (const p of posts) { 
       const results = []; 
       for (const aid of p.targetAccounts) { 
@@ -475,26 +567,41 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   async function rssRule(rule) { try { const feed = await parser.parseURL(rule.source.url); const items = feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); const item = items[0]; if (!item) return; const uid = item.guid || item.link; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; const text = item.contentSnippet || item.content || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; let pt = `${item.title}\n\n${text}`; if (rule.addSourceLink) pt += `\n\n🔗 ${item.link}`; if (rule.appendText) pt += `\n\n${rule.appendText}`; const media = []; if (item.enclosure?.url) media.push({ url: item.enclosure.url, type: 'image' }); else { const m = (item.content || '').match(/<img[^>]+src="([^">]+)"/); if (m) media.push({ url: m[1], type: 'image' }); } const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text: pt, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text: pt, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { } }
   async function tgRule(rule) { const u = rule.source.tgUsername.replace('@', ''); const o = rule.source.url; rule.source.url = `https://rsshub.app/telegram/channel/${u}`; await rssRule(rule); rule.source.url = o; }
   async function vkRule(rule) { try { const oid = rule.source.vkOwnerId; let token = rule.source.vkToken; if (!token) { const a = await Account.findOne({ platform: 'vk', isActive: true }); if (a) token = dec(a.encryptedToken); } if (!token) throw new Error('No token'); const r = await axios.get('https://api.vk.ru/method/wall.get', { params: { owner_id: oid, count: 5, access_token: token, v: '5.199' } }); if (r.data.error) throw new Error(r.data.error.error_msg); const items = r.data.response.items; if (!items?.length) return; const item = items.find(i => !i.is_pinned) || items[0]; const uid = `vk_${oid}_${item.id}`; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; let text = item.text || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; const media = (item.attachments || []).filter(a => a.type === 'photo').map(a => ({ url: a.photo.sizes.slice(-1)[0].url, type: 'image' })); const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { console.error('[vkRule] Error processing rule', rule.name, ':', e.message); } }
-  cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { console.error('[cron] Unexpected error:', e.message); } });
+  cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }).exec(); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { console.error('[cron] Unexpected error:', e.message); } });
 
   // Test
   // SEC-009: Added rate limit for test trigger
-  app.get('/api/test/trigger', strictLim, async (req, res) => { try { await check(); const rules = await RepostRule.find({ status: 'active' }); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: 'Internal test failure' }); } });
-  app.get('/api/test/telegram', async (req, res) => { try { const { token } = req.query; if (!token) return res.status(400).json({ error: 'Missing' }); const r = await axios.get(`https://api.telegram.org/bot${token}/getMe`); if (r.data.ok) return res.json({ ok: true, name: r.data.result.username }); res.status(400).json({ error: r.data.description }); } catch (e) { res.status(500).json({ error: 'TG error' }); } });
+  app.get('/api/test/trigger', strictLim, async (req, res) => { try { await check(); const rules = await RepostRule.find({ status: 'active' }).exec(); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: 'Internal test failure' }); } });
+  app.get('/api/test/telegram', async (req, res) => {
+    try {
+      const { token, accountId } = req.query;
+      let botToken = token;
+      if (!botToken && accountId) {
+        const acc = await Account.findById(String(accountId));
+        if (!acc) return res.status(404).json({ ok: false, error: 'Account not found' });
+        botToken = acc.encryptedToken ? dec(acc.encryptedToken) : null;
+      }
+      if (!botToken) return res.status(400).json({ ok: false, error: 'Missing token or accountId' });
+      const r = await axios.get(`https://api.telegram.org/bot${botToken}/getMe`);
+      if (r.data.ok) return res.json({ ok: true, name: r.data.result.username });
+      res.status(400).json({ ok: false, error: r.data.description });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message || 'TG error' });
+    }
+  });
 
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
       uptime: process.uptime(),
-      db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      db: supabase ? 'connected' : 'disconnected',
       time: new Date().toISOString()
     });
   });
 
   // MongoDB
-  if (process.env.MONGO_URI) { mongoose.connect(process.env.MONGO_URI).then(() => console.log('✅ Mongo')).catch(e => console.error('❌ Mongo:', e.message)); }
-
-  // Replace health handler with Express
+  // Using Supabase instead of MongoDB
+// Replace health handler with Express
   server.removeAllListeners('request');
   server.on('request', app);
 
