@@ -230,3 +230,33 @@ export interface Post {
   disableComments?: boolean;
   isVkStory?: boolean;
 }
+
+// ─── News ────────────────────────────────────────────────────────────────────
+export type NewsCategory = 'news' | 'fact' | 'law' | 'social' | 'market';
+export type NewsStatus = 'queued' | 'sent' | 'skipped';
+
+export interface NewsItem {
+  id: number;
+  title: string;
+  preview: string;
+  content?: string;
+  category: NewsCategory;
+  status: NewsStatus;
+  source: string;
+  sourceIcon: string;
+  sourceUrl: string;
+  date: string;
+  tags: string[];
+  scheduledFor?: string;
+}
+
+export interface NewsSource {
+  id: string;
+  name: string;
+  type: 'rss' | 'vk' | 'telegram' | 'web';
+  url: string;
+  enabled: boolean;
+  itemsFound: number;
+  lastParsed?: string;
+  createdAt: string;
+}

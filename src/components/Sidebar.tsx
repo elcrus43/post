@@ -1,4 +1,4 @@
-﻿import { PenSquare, Clock, Users, History, Settings, Zap, BookOpen, Sparkles, RefreshCw, BarChart2 } from 'lucide-react'; // eslint-disable-line
+﻿import { PenSquare, Clock, Users, History, Settings, Zap, Sparkles, RefreshCw, BarChart2, Newspaper } from 'lucide-react'; // eslint-disable-line
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
 
@@ -7,11 +7,11 @@ const navItems = [
   { id: 'ai', label: 'AI Ассистент', icon: Sparkles, badge: 'AI' },
   { id: 'reposter', label: 'Репостер', icon: RefreshCw },
   { id: 'analytics', label: 'UTM & Аналитика', icon: BarChart2 },
+  { id: 'news', label: 'Новости', icon: Newspaper },
   { id: 'scheduler', label: 'Планировщик', icon: Clock },
   { id: 'accounts', label: 'Аккаунты', icon: Users },
   { id: 'history', label: 'История', icon: History },
   { id: 'settings', label: 'Настройки', icon: Settings },
-  { id: 'deploy', label: 'Деплой & Бэкап', icon: BookOpen },
 ];
 
 export default function Sidebar() {

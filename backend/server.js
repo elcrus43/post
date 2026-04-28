@@ -694,6 +694,143 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
   }
   console.log(`??? ${process.env.MONGO_URI ? '?' : '??'}`);
 
+  // News Sources API
+  const NewsSource = makeModel('news_sources');
+  const NewsItem = makeModel('news_items');
+  
+  app.get('/api/news/sources', async (req, res) => {
+    try {
+      const sources = await NewsSource.find().sort({ createdAt: -1 });
+      res.json(sources);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/news/sources', async (req, res) => {
+    try {
+      const { name, type, url } = req.body;
+      if (!name || !url) return res.status(400).json({ error: 'Name and URL required' });
+      const source = new NewsSource({ name, type, url, enabled: true, itemsFound: 0 });
+      await source.save();
+      res.json(source);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/news/sources/:id', async (req, res) => {
+    try {
+      const source = await NewsSource.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      res.json(source);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/news/sources/:id', async (req, res) => {
+    try {
+      await NewsSource.findByIdAndDelete(req.params.id);
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/news/sources/:id/parse', async (req, res) => {
+    try {
+      const source = await NewsSource.findById(req.params.id);
+      if (!source) return res.status(404).json({ error: 'Source not found' });
+      
+      if (source.type === 'rss') {
+        const feed = await parser.parseURL(source.url);
+        const items = feed.items.slice(0, 20);
+        
+        // Save items to database
+        const savedItems = [];
+        for (const item of items) {
+          const newsItem = new NewsItem({
+            title: item.title || 'No title',
+            preview: item.contentSnippet || item.content || '',
+            category: 'news',
+            status: 'queued',
+            source: source.name,
+            sourceIcon: '📡',
+            sourceUrl: item.link || source.url,
+            date: item.pubDate || new Date(),
+            tags: ['rss', 'auto-imported']
+          });
+          await newsItem.save();
+          savedItems.push(newsItem);
+        }
+        
+        source.itemsFound = (source.itemsFound || 0) + items.length;
+        source.lastParsed = new Date().toISOString();
+        await source.save();
+        
+        res.json({ success: true, items: savedItems });
+      } else {
+        res.status(400).json({ error: 'Only RSS parsing is supported currently' });
+      }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/news/parse-all', async (req, res) => {
+    try {
+      const sources = await NewsSource.find({ enabled: true });
+      let allItems = [];
+      
+      for (const source of sources) {
+        if (source.type === 'rss') {
+          try {
+            const feed = await parser.parseURL(source.url);
+            const items = feed.items.slice(0, 10);
+            
+            // Save items to database
+            for (const item of items) {
+              const newsItem = new NewsItem({
+                title: item.title || 'No title',
+                preview: (item.contentSnippet || item.content || '').substring(0, 500),
+                category: 'news',
+                status: 'queued',
+                source: source.name,
+                sourceIcon: '📡',
+                sourceUrl: item.link || source.url,
+                date: item.pubDate || new Date(),
+                tags: ['rss', 'auto-imported']
+              });
+              await newsItem.save();
+              allItems.push(newsItem);
+            }
+            
+            source.itemsFound = (source.itemsFound || 0) + items.length;
+            source.lastParsed = new Date().toISOString();
+            await source.save();
+          } catch (e) {
+            console.error(`Failed to parse ${source.name}:`, e.message);
+          }
+        }
+      }
+      
+      res.json({ success: true, items: allItems, count: allItems.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // News Items API
+  app.get('/api/news/items', async (req, res) => {
+    try {
+      const items = await NewsItem.find().sort({ date: -1 });
+      res.json(items);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/news/items/:id', async (req, res) => {
+    try {
+      const item = await NewsItem.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      res.json(item);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/news/items', async (req, res) => {
+    try {
+      const item = new NewsItem(req.body);
+      await item.save();
+      res.json(item);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // Catch-all
   app.get('*', (req, res) => { const fp = path.join(distPath, 'index.html'); if (fs.existsSync(fp)) res.sendFile(fp); else res.status(200).send('<h1>Backend ok</h1>'); });
 

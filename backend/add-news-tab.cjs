@@ -1,0 +1,1 @@
+﻿const fs=require('fs'); const f='c:/Users/Office-40/post-project/src/components/Sidebar.tsx'; let d=fs.readFileSync(f,'utf8'); d=d.replace({ id: 'reposter', label: 'епостер', icon: RefreshCw },, { id: 'reposter', label: 'епостер', icon: RefreshCw },\n  { id: 'news', label: 'News', icon: BookOpen },); fs.writeFileSync(f,d,'utf8'); console.log('DONE');

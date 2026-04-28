@@ -10,8 +10,6 @@ import PlatformIcon from './PlatformIcon';
 import { publishToAccount } from '../services/apiService';
 import { cn } from '../utils/cn';
 import { generateUtmParams, injectUtmIntoText, toSlug, extractUrls } from '../utils/utm';
-import StickerPicker from './StickerPicker';
-import MentionInput from './MentionInput';
 import toast from 'react-hot-toast';
 
 const MAX_CHARS = 4096;
@@ -305,10 +303,8 @@ export default function ComposerPage() {
                 <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={handleMediaUpload} />
 
                 {/* Sticker picker */}
-                <StickerPicker selected={stickers} onChange={setStickers} />
 
                 {/* Mention input */}
-                <MentionInput mentions={mentions} onChange={setMentions} />
               </div>
 
               {/* Chars counter */}

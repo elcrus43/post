@@ -1,0 +1,190 @@
+import { useState } from 'react';
+import { SourceConfig } from '../types';
+import { mockSources } from '../data/mockData';
+
+const TYPE_META: Record<string, { icon: string; label: string; color: string }> = {
+  rss: { icon: '📡', label: 'RSS', color: 'text-orange-400 bg-orange-500/15' },
+  vk: { icon: '🔵', label: 'ВКонтакте', color: 'text-blue-400 bg-blue-500/15' },
+  telegram: { icon: '✈️', label: 'Telegram', color: 'text-cyan-400 bg-cyan-500/15' },
+  web: { icon: '🌐', label: 'Web', color: 'text-violet-400 bg-violet-500/15' },
+};
+
+interface SourceRowProps {
+  source: SourceConfig;
+  onToggle: (id: number) => void;
+  onParse: (id: number) => void;
+}
+
+function SourceRow({ source, onToggle, onParse }: SourceRowProps) {
+  const meta = TYPE_META[source.type];
+  const [parsing, setParsing] = useState(false);
+
+  const handleParse = () => {
+    setParsing(true);
+    onParse(source.id);
+    setTimeout(() => setParsing(false), 2000);
+  };
+
+  const formatTime = (iso?: string) =>
+    iso
+      ? new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : '—';
+
+  return (
+    <div className={`flex items-center gap-4 p-4 rounded-2xl border transition-all duration-300 ${source.enabled ? 'bg-slate-900/60 border-slate-800 hover:border-slate-700' : 'bg-slate-900/30 border-slate-800/50 opacity-60'}`}>
+      {/* Type badge */}
+      <span className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl ${meta.color}`}>
+        {meta.icon}
+      </span>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <p className="text-white text-sm font-semibold truncate">{source.name}</p>
+          <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${meta.color}`}>{meta.label}</span>
+        </div>
+        <p className="text-slate-500 text-xs truncate">{source.url}</p>
+      </div>
+
+      {/* Stats */}
+      <div className="hidden md:flex flex-col items-center text-center min-w-[80px]">
+        <span className="text-white font-bold text-lg">{source.itemsFound ?? 0}</span>
+        <span className="text-slate-500 text-xs">материалов</span>
+      </div>
+      <div className="hidden lg:flex flex-col items-center text-center min-w-[70px]">
+        <span className="text-slate-300 text-sm font-medium">{formatTime(source.lastParsed)}</span>
+        <span className="text-slate-500 text-xs">последний парс</span>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={handleParse}
+          disabled={!source.enabled || parsing}
+          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+            parsing
+              ? 'bg-blue-500/20 text-blue-300 cursor-wait'
+              : source.enabled
+              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+              : 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+          }`}
+        >
+          {parsing ? '⚡ Парсинг...' : '🔄 Запустить'}
+        </button>
+
+        {/* Toggle */}
+        <button
+          onClick={() => onToggle(source.id)}
+          className={`relative w-11 h-6 rounded-full transition-all duration-300 ${source.enabled ? 'bg-blue-500' : 'bg-slate-700'}`}
+        >
+          <span
+            className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all duration-300 ${source.enabled ? 'left-6' : 'left-1'}`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function SourcesPanel() {
+  const [sources, setSources] = useState<SourceConfig[]>(mockSources);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newUrl, setNewUrl] = useState('');
+  const [newType, setNewType] = useState<SourceConfig['type']>('rss');
+  const [newName, setNewName] = useState('');
+
+  const handleToggle = (id: number) => {
+    setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
+  };
+
+  const handleParse = (id: number) => {
+    setSources((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, lastParsed: new Date().toISOString(), itemsFound: Math.floor(Math.random() * 15) + 1 } : s
+      )
+    );
+  };
+
+  const handleAdd = () => {
+    if (!newUrl || !newName) return;
+    const newSrc: SourceConfig = {
+      id: Date.now(),
+      name: newName,
+      type: newType,
+      url: newUrl,
+      enabled: true,
+    };
+    setSources((prev) => [...prev, newSrc]);
+    setNewUrl('');
+    setNewName('');
+    setShowAdd(false);
+  };
+
+  const activeCount = sources.filter((s) => s.enabled).length;
+
+  return (
+    <div id="sources" className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-white font-bold text-xl">Источники данных</h2>
+          <p className="text-slate-500 text-sm mt-0.5">
+            Активных: <span className="text-emerald-400 font-semibold">{activeCount}</span> из {sources.length}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2"
+        >
+          <span>+</span> Добавить источник
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showAdd && (
+        <div className="p-5 bg-slate-900/80 border border-blue-500/30 rounded-2xl space-y-4 animate-in">
+          <p className="text-white font-semibold">Новый источник</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Название источника"
+              className="px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+            <input
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder="URL / @канал"
+              className="px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+            <select
+              value={newType}
+              onChange={(e) => setNewType(e.target.value as SourceConfig['type'])}
+              className="px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+            >
+              <option value="rss">📡 RSS</option>
+              <option value="vk">🔵 ВКонтакте</option>
+              <option value="telegram">✈️ Telegram</option>
+              <option value="web">🌐 Web</option>
+            </select>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleAdd} className="px-5 py-2 bg-blue-500 hover:bg-blue-400 text-white text-sm font-semibold rounded-xl transition-all">
+              Добавить
+            </button>
+            <button onClick={() => setShowAdd(false)} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium rounded-xl transition-all">
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sources list */}
+      <div className="space-y-2">
+        {sources.map((s) => (
+          <SourceRow key={s.id} source={s} onToggle={handleToggle} onParse={handleParse} />
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -16,7 +16,7 @@ import AiAssistantPage from './components/AiAssistantPage';
 import ReposterPage from './components/ReposterPage';
 import QueuePage from './components/QueuePage';
 import AnalyticsPage from './components/AnalyticsPage';
-
+import NewsPage from './components/NewsPage';
 export default function App() {
   const { activeTab, isAuthorized, syncData } = useStore();
   useScheduler();      // ⏰ Синхронизация планировщика
@@ -45,11 +45,11 @@ export default function App() {
       case 'reposter':   return <ReposterPage />;
       case 'queue':      return <QueuePage />;
       case 'analytics':  return <AnalyticsPage />;
+      case 'news':       return <NewsPage />;
       case 'scheduler':  return <SchedulerPage />;
       case 'accounts':   return <AccountsPage />;
       case 'history':    return <HistoryPage />;
       case 'settings':   return <SettingsPage />;
-      case 'deploy':     return <DeployGuidePage />;
       default:           return <ComposerPage />;
     }
   };
