@@ -1,0 +1,3 @@
+﻿ALTER TABLE repost_history ADD COLUMN IF NOT EXISTS text TEXT;
+ALTER TABLE repost_history ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE repost_history ADD COLUMN IF NOT EXISTS results JSONB;

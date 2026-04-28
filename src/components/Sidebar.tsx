@@ -1,4 +1,4 @@
-import { PenSquare, Clock, Users, History, Settings, Zap, BookOpen, Sparkles, RefreshCw, BarChart2 } from 'lucide-react'; // eslint-disable-line
+﻿import { PenSquare, Clock, Users, History, Settings, Zap, BookOpen, Sparkles, RefreshCw, BarChart2 } from 'lucide-react'; // eslint-disable-line
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
 

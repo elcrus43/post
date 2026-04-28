@@ -1,0 +1,1 @@
+const axios=require("axios");(async()=>{const l=await axios.post("http://localhost:3000/api/login",{password:"pass55184"});const c=l.headers["set-cookie"];const rules=await axios.get("http://localhost:3000/api/reposter/rules",{headers:{Cookie:c}});rules.data.forEach(r=>{console.log(r.name,"- isActive:",r.isActive);});process.exit();})();

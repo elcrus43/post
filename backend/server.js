@@ -1,4 +1,4 @@
-// server.js
+﻿// server.js
 // ============================================
 // STEP 1: Start health server BEFORE any await
 // ============================================
@@ -19,8 +19,8 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`✅ Health ${HOST}:${PORT}`));
-server.on('error', (err) => { console.error('❌', err); process.exit(1); });
+server.listen(PORT, HOST, () => console.log(`? Health ${HOST}:${PORT}`));
+server.on('error', (err) => { console.error('?', err); process.exit(1); });
 
 // ============================================
 // STEP 2: Load everything in async IIFE (non-blocking)
@@ -68,7 +68,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const crypto = (await import('crypto')).default;
   const { createClient } = await import('@supabase/supabase-js');
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-  console.log('✅ Supabase initialized');
+  console.log('? Supabase initialized');
   const md5 = (await import('md5')).default;
   const FormData = (await import('form-data')).default;
   const { createProxyMiddleware } = await import('http-proxy-middleware');
@@ -76,9 +76,10 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   const cron = (await import('node-cron')).default;
   const Parser = (await import('rss-parser')).default;
   const parser = new Parser();
+  const { notifyQueue } = await import('./notify.cjs');
 
   const APP_PASSWORD = process.env.APP_PASSWORD;
-  if (!APP_PASSWORD) console.warn('⚠️ No APP_PASSWORD');
+  if (!APP_PASSWORD) console.warn('?? No APP_PASSWORD');
 
   const allowedOrigins = [
     process.env.FRONTEND_URL,
@@ -466,6 +467,78 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
       res.json(sv.data.response);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
+  
+
+  // AI Humanizer endpoint
+  app.post('/api/reposter/humanize', async (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text) return res.status(400).json({ error: 'Text required' });
+      
+      // Simple humanization - can be replaced with AI API call
+      const humanized = text
+        .replace(/\\b(очень|действительно|абсолютно)\\b/gi, '')
+        .replace(/\\b(важно отметить|следует отметить)\\b/gi, '')
+        .replace(/\\s{2,}/g, ' ')
+        .replace(/\\n{3,}/g, '\\n\\n');
+      
+      // Add some variation
+      const intros = ['стати, ', 'нтересно, ', 'ак оказалось, '];
+      const randomIntro = intros[Math.floor(Math.random() * intros.length)];
+      
+      const lines = humanized.split('\\n');
+      if (lines.length > 0 && !lines[0].startsWith('стати') && !lines[0].startsWith('нтересно')) {
+        lines[0] = randomIntro + lines[0].toLowerCase();
+      }
+      
+      res.json({ 
+        original: text,
+        humanized: lines.join('\\n'),
+        method: 'basic'
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Telegram webhook for inline button callbacks
+  app.post('/api/telegram/webhook', async (req, res) => {
+    try {
+      const update = req.body;
+      if (update.callback_query) {
+        const callback = update.callback_query;
+        const chatId = callback.message.chat.id;
+        const messageId = callback.message.message_id;
+        const data = callback.data;
+        const queueItemId = data.split('_').slice(1).join('_');
+        if (data.startsWith('approve_')) {
+          const item = await RepostQueue.findById(queueItemId);
+          if (!item) {
+            await axios.post('https://api.telegram.org/bot' + process.env.TG_NOTIFICATION_BOT_TOKEN + '/answerCallbackQuery', { callback_query_id: callback.id, text: 'Element not found', show_alert: true });
+            return res.status(200).send('OK');
+          }
+          const text = item.original_text;
+          const results = [];
+          for (const aid of (item.target_account_ids || [])) {
+            try { const r = await pub(aid, { text, media: item.media || [] }); results.push({ accountId: aid, ...r, publishedAt: new Date() }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message, publishedAt: new Date() }); }
+          }
+          item.status = results.some(r => r.status === 'success') ? 'published' : 'error';
+          item.results = results;
+          item.published_at = new Date();
+          item.approved_at = new Date();
+          await item.save();
+          await axios.post('https://api.telegram.org/bot' + process.env.TG_NOTIFICATION_BOT_TOKEN + '/editMessageText', { chat_id: chatId, message_id: messageId, text: '✅ публиковано!' });
+          await axios.post('https://api.telegram.org/bot' + process.env.TG_NOTIFICATION_BOT_TOKEN + '/answerCallbackQuery', { callback_query_id: callback.id, text: '✅ публиковано!' });
+        } else if (data.startsWith('reject_')) {
+          await RepostQueue.findByIdAndUpdate(queueItemId, { status: 'rejected', approved_at: new Date() });
+          await axios.post('https://api.telegram.org/bot' + process.env.TG_NOTIFICATION_BOT_TOKEN + '/editMessageText', { chat_id: chatId, message_id: messageId, text: '❌ ропущено' });
+          await axios.post('https://api.telegram.org/bot' + process.env.TG_NOTIFICATION_BOT_TOKEN + '/answerCallbackQuery', { callback_query_id: callback.id, text: '❌ ропущено' });
+        }
+      }
+      res.status(200).send('OK');
+    } catch (e) { console.error('[Telegram webhook] Error:', e.message); res.status(500).send('Error'); }
+  });
+
   app.post('/api/publish/telegram', async (req, res) => {
     try { const { accountId, token, ownerId, text, media } = req.body; res.json(await pub(accountId || { platform: 'telegram', token, ownerId }, { text, media })); }
     catch (e) { res.status(500).json({ error: e.message }); }
@@ -524,7 +597,7 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
 
     if (platform === 'ok') { const ak = acc.okAppKey, sk = dec(acc.okAppSecretKey), ssk = md5(token + sk).toLowerCase(), ao = { media: [{ type: 'text', text }] }; media.forEach(m => ao.media.push({ type: 'photo', url: m.url })); const params = { application_key: ak, attachment: JSON.stringify(ao), format: 'json', method: 'mediatopic.post', type: 'GROUP_THEME', ...(ownerId ? { gid: ownerId } : {}) }; const sig = okSign(params, ssk); const r = await axios.get('https://api.ok.ru/fb.do', { params: { ...params, sig, access_token: token } }); if (r.data.error_code) throw new Error(r.data.error_msg); return { platform: 'ok', status: 'success', postId: r.data }; }
 
-    if (platform === 'twitter') { const td = { text }; if (media.length > 0) { const ids = []; for (const m of media.slice(0, 4)) { try { vUrl(m.url); const dr = await axios.get(m.url, { responseType: 'arraybuffer' }); const form = new FormData(); form.append('media', Buffer.from(dr.data), { filename: m.name || 'image.jpg' }); const ur = await axios.post('https://upload.twitter.com/1.1/media/upload.json', form, { headers: { ...form.getHeaders(), 'Authorization': `Bearer ${token}` } }); if (ur.data.media_id_string) ids.push(ur.data.media_id_string); } catch (e) { } } if (ids.length) td.media = { media_ids: ids }; } const r = await axios.post('https://api.twitter.com/2/tweets', td, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }); return { platform: 'twitter', status: 'success', postId: r.data.data.id, postUrl: `https://twitter.com/i/status/${r.data.data.id}` }; }
+    if (platform === 'twitter') { const td = { text }; if (media.length > 0) { const ids = []; for (const m of media.slice(0, 4)) { try { vUrl(m.url); const dr = await axios.get(m.url, { responseType: 'arraybuffer' }); const form = new FormData(); form.append('media', Buffer.from(dr.data), { filename: m.name || 'image.jpg' }); const ur = await axios.post('https://upload.twitter.com/1.1/media/upload.json', form, { headers: { ...form.getHeaders(), 'Authorization': `Bearer ${token}` } }); if (ur.data.media_id_string) ids.push(ur.data.media_id_string); } catch (e) { console.error('[rssRule] Error:', e.message); } } if (ids.length) td.media = { media_ids: ids }; } const r = await axios.post('https://api.twitter.com/2/tweets', td, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }); return { platform: 'twitter', status: 'success', postId: r.data.data.id, postUrl: `https://twitter.com/i/status/${r.data.data.id}` }; }
 
     if (platform === 'tenchat') { const r = await axios.post('https://api.tenchat.ru/v1/posts', { text, attachments: media.map(m => m.url) }, { headers: { Authorization: `Bearer ${token}` } }); return { platform: 'tenchat', status: 'success', postId: r.data.id }; }
 
@@ -542,6 +615,14 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   app.post('/api/reposter/rules', async (req, res) => { try { console.log('POST /api/reposter/rules:', JSON.stringify(req.body, null, 2)); const body = { ...req.body, keywords: Array.isArray(req.body.keywords) ? req.body.keywords : [], excludeKeywords: Array.isArray(req.body.excludeKeywords) ? req.body.excludeKeywords : [] }; const r = new RepostRule(body); await r.save(); res.json(r); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.patch('/api/reposter/rules/:id', async (req, res) => { try { res.json(await RepostRule.findByIdAndUpdate(req.params.id, req.body, { new: true })); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.delete('/api/reposter/rules/:id', async (req, res) => { try { await RepostRule.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+  // Repost Queue API
+  const RepostQueue = makeModel('repost_queue');
+  app.get('/api/reposter/queue', async (req, res) => { try { const items = await RepostQueue.find({ status: 'pending' }).sort({ created_at: -1 }).limit(50); res.json(items); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/reposter/queue/:id/approve', async (req, res) => { try { const item = await RepostQueue.findById(req.params.id); if (!item) return res.status(404).json({ error: 'Not found' }); const text = req.body.text || item.humanized_text || item.original_text; const targetIds = req.body.target_account_ids || item.target_account_ids || []; const results = []; for (const aid of targetIds) { try { const r = await pub(aid, { text, media: item.media || [] }); results.push({ accountId: aid, ...r, publishedAt: new Date() }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message, publishedAt: new Date() }); } } item.status = results.some(r => r.status === 'success') ? 'published' : 'error'; item.results = results; item.published_at = new Date(); item.approved_at = new Date(); await item.save(); res.json(item); } catch (e) { res.status(500).json({ error: e.message }); } });
+  app.post('/api/reposter/queue/:id/reject', async (req, res) => { try { const item = await RepostQueue.findByIdAndUpdate(req.params.id, { status: 'rejected', approved_at: new Date() }, { new: true }); res.json(item); } catch (e) { res.status(500).json({ error: e.message }); } });
+  // TODO: Humanize endpoint
+  app.delete('/api/reposter/queue', async (req, res) => { try { await RepostQueue.deleteMany({ status: 'rejected' }); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.get('/api/reposter/history', async (req, res) => { try { res.json(await RepostHistory.find().sort({ publishedAt: -1 }).limit(100)); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.delete('/api/reposter/history', async (req, res) => { try { await RepostHistory.deleteMany({}); res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
@@ -564,9 +645,9 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
       await p.save(); 
     } 
   }
-  async function rssRule(rule) { try { const feed = await parser.parseURL(rule.source.url); const items = feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); const item = items[0]; if (!item) return; const uid = item.guid || item.link; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; const text = item.contentSnippet || item.content || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; let pt = `${item.title}\n\n${text}`; if (rule.addSourceLink) pt += `\n\n🔗 ${item.link}`; if (rule.appendText) pt += `\n\n${rule.appendText}`; const media = []; if (item.enclosure?.url) media.push({ url: item.enclosure.url, type: 'image' }); else { const m = (item.content || '').match(/<img[^>]+src="([^">]+)"/); if (m) media.push({ url: m[1], type: 'image' }); } const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text: pt, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text: pt, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { } }
-  async function tgRule(rule) { const u = rule.source.tgUsername.replace('@', ''); const o = rule.source.url; rule.source.url = `https://rsshub.app/telegram/channel/${u}`; await rssRule(rule); rule.source.url = o; }
-  async function vkRule(rule) { try { const oid = rule.source.vkOwnerId; let token = rule.source.vkToken; if (!token) { const a = await Account.findOne({ platform: 'vk', isActive: true }); if (a) token = dec(a.encryptedToken); } if (!token) throw new Error('No token'); const r = await axios.get('https://api.vk.ru/method/wall.get', { params: { owner_id: oid, count: 5, access_token: token, v: '5.199' } }); if (r.data.error) throw new Error(r.data.error.error_msg); const items = r.data.response.items; if (!items?.length) return; const item = items.find(i => !i.is_pinned) || items[0]; const uid = `vk_${oid}_${item.id}`; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; let text = item.text || ''; if (rule.filters.minLength && text.length < rule.filters.minLength) return; const media = (item.attachments || []).filter(a => a.type === 'photo').map(a => ({ url: a.photo.sizes.slice(-1)[0].url, type: 'image' })); const results = []; for (const aid of rule.targetAccountIds) { try { const r = await pub(aid, { text, media }); results.push({ accountId: aid, ...r }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text, results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { console.error('[vkRule] Error processing rule', rule.name, ':', e.message); } }
+  
+async function rssRule(rule) { try { const feed = await parser.parseURL(rule.source.url); const items = feed.items.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)); const item = items[0]; if (!item) return; const uid = item.guid || item.link; if (await RepostQueue.findOne({ source_url: uid })) return; let pt = item.title + "\n\n" + (item.contentSnippet || item.content || ""); if (rule.addSourceLink) pt += "\n\n[LINK] " + item.link; const media = []; if (item.enclosure?.url) media.push({ url: item.enclosure.url, type: "image" }); const newItem = new RepostQueue({ rule_id: rule._id, source_url: uid, source_platform: "rss", original_text: pt, media, target_account_ids: rule.targetAccountIds, status: "pending" }); await newItem.save(); console.log('[rssRule] Added to queue:', pt.substring(0, 100)); await notifyQueue(newItem); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { console.error('[rssRule] Error:', e.message); } }
+  async function vkRule(rule) { try { const sourceOid = rule.source.vkOwnerId; let userToken = rule.source.vkToken; if (!userToken) { const a = await Account.findOne({ platform: 'vk', isActive: true }); if (a) userToken = dec(a.encryptedToken); } if (!userToken) throw new Error('No VK user token'); const r = await axios.get('https://api.vk.ru/method/wall.get', { params: { owner_id: sourceOid, count: 5, filter: 'owner', access_token: userToken, v: '5.199' } }); if (r.data.error) throw new Error(r.data.error.error_msg); const items = r.data.response.items; if (!items?.length) return; const item = items.find(i => !i.is_pinned) || items[0]; const uid = `vk_repost_${sourceOid}_${item.id}`; if (await RepostHistory.findOne({ sourceUrl: uid }) && rule.skipDuplicates) return; const results = []; for (const aid of rule.targetAccountIds) { try { const targetOid = aid.startsWith('-' ) ? aid.substring(1) : aid; const repost = await axios.get('https://api.vk.ru/method/wall.repost', { params: { object: `wall${sourceOid}_${item.id}`, group_id: targetOid, access_token: userToken, v: '5.199' } }); if (repost.data.error) throw new Error(repost.data.error.error_msg); results.push({ accountId: aid, status: 'success', postId: repost.data.response }); } catch (e) { results.push({ accountId: aid, status: 'error', error: e.message }); } } await new RepostHistory({ ruleId: rule._id, sourceUrl: uid, text: item.text || '', results, status: results.some(r => r.status === 'success') ? 'success' : 'error' }).save(); rule.lastCheckedAt = new Date(); await rule.save(); } catch (e) { console.error('[vkRule] Error processing rule', rule.name, ':', e.message); } }
   cron.schedule('* * * * *', async () => { try { await check(); const rules = await RepostRule.find({ status: 'active' }).exec(); for (const r of rules) { if (r.source.type === 'rss') await rssRule(r); else if (r.source.type === 'vk_wall') await vkRule(r); else if (r.source.type === 'tg_channel') await tgRule(r); } } catch (e) { console.error('[cron] Unexpected error:', e.message); } });
 
   // Test
@@ -605,17 +686,17 @@ server.on('error', (err) => { console.error('❌', err); process.exit(1); });
   server.removeAllListeners('request');
   server.on('request', app);
 
-  console.log('\n🚀 App ready!');
-  console.log(`📡 ${HOST}:${PORT}`);
-  console.log(`🔐 ${APP_PASSWORD ? '✅' : '⚠️'}`);
+  console.log('\n?? App ready!');
+  console.log(`?? ${HOST}:${PORT}`);
+  console.log(`?? ${APP_PASSWORD ? '?' : '??'}`);
   if (APP_PASSWORD === 'changeme_or_configure_env') {
     console.log('   !!! WARNING: Using default insecure password !!!');
   }
-  console.log(`🗄️ ${process.env.MONGO_URI ? '✅' : '⚠️'}`);
+  console.log(`??? ${process.env.MONGO_URI ? '?' : '??'}`);
 
   // Catch-all
   app.get('*', (req, res) => { const fp = path.join(distPath, 'index.html'); if (fs.existsSync(fp)) res.sendFile(fp); else res.status(200).send('<h1>Backend ok</h1>'); });
 
-  process.on('unhandledRejection', r => console.error('🚨', r));
-  process.on('uncaughtException', e => { console.error('🚨', e); process.exit(1); });
+  process.on('unhandledRejection', r => console.error('??', r));
+  process.on('uncaughtException', e => { console.error('??', e); process.exit(1); });
 })();

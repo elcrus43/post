@@ -1,4 +1,4 @@
-import { Toaster } from 'react-hot-toast';
+﻿import { Toaster } from 'react-hot-toast';
 import { useStore } from './store/useStore';
 import { useScheduler } from './hooks/useScheduler';
 import { useReposter } from './hooks/useReposter';
@@ -14,6 +14,7 @@ import SettingsPage from './components/SettingsPage';
 import DeployGuidePage from './components/DeployGuidePage';
 import AiAssistantPage from './components/AiAssistantPage';
 import ReposterPage from './components/ReposterPage';
+import QueuePage from './components/QueuePage';
 import AnalyticsPage from './components/AnalyticsPage';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
       case 'composer':   return <ComposerPage />;
       case 'ai':         return <AiAssistantPage />;
       case 'reposter':   return <ReposterPage />;
+      case 'queue':      return <QueuePage />;
       case 'analytics':  return <AnalyticsPage />;
       case 'scheduler':  return <SchedulerPage />;
       case 'accounts':   return <AccountsPage />;

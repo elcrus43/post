@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Clock, Rss, MessageSquare,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, AlertCircle,
@@ -75,7 +75,7 @@ function RuleForm({
   onCancel: () => void;
 }) {
   const { accounts } = useStore();
-  const [form, setForm] = useState(initial);
+  const [form, setForm] = useState({ ...initial, schedule: initial.schedule || { days: [], hours: [], intervalMin: 30, intervalMax: 120 } });
   const [tab, setTab] = useState<'source' | 'targets' | 'schedule' | 'filters' | 'options'>('source');
   const [stopWordsInput, setStopWordsInput] = useState(initial.filters.stopWords.join(', '));
   const [requiredWordsInput, setRequiredWordsInput] = useState(initial.filters.requiredWords.join(', '));
@@ -90,9 +90,9 @@ function RuleForm({
   };
 
   const toggleDay = (d: number) => {
-    const days = form.schedule.days.includes(d)
-      ? form.schedule.days.filter((x) => x !== d)
-      : [...form.schedule.days, d];
+    const days = (form.schedule?.days || []).includes(d)
+      ? (form.schedule?.days || []).filter((x) => x !== d)
+      : [...(form.schedule?.days || []), d];
     upd('schedule.days', days);
   };
 
@@ -337,7 +337,7 @@ function RuleForm({
                       onClick={() => toggleDay(i)}
                       className={cn(
                         'w-10 h-10 rounded-xl text-xs font-semibold transition-all',
-                        form.schedule.days.includes(i)
+                        (form.schedule?.days || []).includes(i)
                           ? 'bg-violet-600 text-white shadow-md shadow-violet-200'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       )}
@@ -669,9 +669,9 @@ function RuleCard({
   const { accounts } = useStore();
   const [expanded, setExpanded] = useState(false);
   const ruleWithDefaults = {
-  source: { type: 'rss', name: '', url: '', ...rule.source },
-  schedule: { days: [], hours: [], intervalMin: 0, intervalMax: 0, ...rule.schedule },
-  filters: { minLength: 0, maxLength: 0, requireImage: false, stopWords: [], requiredWords: [], ...rule.filters },
+  source: { type: 'rss', name: '', url: '', ...(rule.source || {}) },
+  schedule: { days: [], hours: [], intervalMin: 0, intervalMax: 0, ...(rule.schedule || {}) },
+  filters: { minLength: 0, maxLength: 0, requireImage: false, stopWords: [], requiredWords: [], ...(rule.filters || {}) },
   targetAccountIds: [],
   ...rule
 };
@@ -757,7 +757,7 @@ function RuleCard({
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Clock size={12} />
-            <span>{ruleWithDefaults.schedule.days.length} дн./нед. · {ruleWithDefaults.schedule.hours.length} часов</span>
+            <span>{(ruleWithDefaults.schedule?.days || []).length} дн./нед. · {(ruleWithDefaults.schedule?.hours || []).length} часов</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Settings2 size={12} />
@@ -788,9 +788,9 @@ function RuleCard({
         <div className="px-4 pb-4 border-t border-gray-50 pt-3 grid grid-cols-2 gap-3 text-xs">
           <div className="bg-gray-50 rounded-xl p-3">
             <div className="font-semibold text-gray-600 mb-2">📅 Расписание</div>
-            <div className="text-gray-500">Дни: {ruleWithDefaults.schedule.days.map((d) => DAYS[d]).join(', ')}</div>
-            <div className="text-gray-500">Часы: {ruleWithDefaults.schedule.hours.map((h) => `${h}:00`).join(', ')}</div>
-            <div className="text-gray-500">Интервал: {ruleWithDefaults.schedule.intervalMin}-{ruleWithDefaults.schedule.intervalMax} мин.</div>
+            <div className="text-gray-500">Дни: {(ruleWithDefaults.schedule?.days || []).map((d) => DAYS[d]).join(', ')}</div>
+            <div className="text-gray-500">Часы: {(ruleWithDefaults.schedule?.hours || []).map((h) => `${h}:00`).join(', ')}</div>
+            <div className="text-gray-500">Интервал: {(ruleWithDefaults.schedule?.intervalMin || 0)}-{(ruleWithDefaults.schedule?.intervalMax || 0)} мин.</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-3">
             <div className="font-semibold text-gray-600 mb-2">🔍 Фильтры</div>
@@ -1027,3 +1027,8 @@ export default function ReposterPage() {
     </div>
   );
 }
+
+
+
+
+
