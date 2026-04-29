@@ -979,6 +979,13 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  app.delete('/api/news/items/:id', async (req, res) => {
+    try {
+      await NewsItem.findByIdAndDelete(req.params.id);
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // Catch-all
   app.get('*', (req, res) => { const fp = path.join(distPath, 'index.html'); if (fs.existsSync(fp)) res.sendFile(fp); else res.status(200).send('<h1>Backend ok</h1>'); });
 

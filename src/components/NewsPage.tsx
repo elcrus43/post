@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, RefreshCw, Rss, Globe, MessageCircle, Loader2, ExternalLink, Clock, Hash, Send, SkipForward, RotateCcw, Filter, Newspaper } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Rss, Globe, MessageCircle, Loader2, ExternalLink, Clock, Hash, Send, SkipForward, RotateCcw, Filter, Newspaper, XCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { NewsSource, NewsItem, NewsCategory } from '../types';
 import toast from 'react-hot-toast';
@@ -190,6 +190,25 @@ export default function NewsPage() {
       if (res.ok) {
         await loadSources();
         toast.success('Источник удален');
+      }
+    } catch (e) {
+      toast.error('Ошибка удаления');
+    }
+  };
+
+  const handleDeleteNews = async (id: number) => {
+    if (!useBackend || !backendUrl) return;
+    const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/news/items/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (res.ok) {
+        await loadNews();
+        toast.success('Новость удалена');
       }
     } catch (e) {
       toast.error('Ошибка удаления');
@@ -590,12 +609,20 @@ export default function NewsPage() {
                             href={item.sourceUrl} 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="ml-auto text-gray-400 hover:text-blue-600 text-xs transition-colors flex items-center gap-1"
+                            className="text-gray-400 hover:text-blue-600 text-xs transition-colors flex items-center gap-1"
                           >
                             <ExternalLink size={12} />
                             Источник
                           </a>
                         )}
+                        <button
+                          onClick={() => handleDeleteNews(item.id)}
+                          className="ml-auto text-gray-400 hover:text-red-600 text-xs transition-colors flex items-center gap-1"
+                          title="Удалить новость"
+                        >
+                          <XCircle size={14} />
+                          Удалить
+                        </button>
                       </div>
                     </div>
                   </div>
