@@ -734,9 +734,11 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
       const source = await NewsSource.findById(req.params.id);
       if (!source) return res.status(404).json({ error: 'Source not found' });
       
+      let items = [];
+      
       if (source.type === 'rss') {
         const feed = await parser.parseURL(source.url);
-        const items = feed.items.slice(0, 20);
+        items = feed.items.slice(0, 20);
         
         // Save items to database
         const savedItems = [];
@@ -761,10 +763,69 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
         await source.save();
         
         res.json({ success: true, items: savedItems });
+        
+      } else if (source.type === 'vk') {
+        // Parse VK wall
+        const vkOwnerId = source.url.replace('https://vk.com/', '').replace('public', '-');
+        const count = 20;
+        const vkResponse = await axios.get('https://api.vk.com/method/wall.get', {
+          params: {
+            owner_id: vkOwnerId,
+            count: count,
+            filter: 'owner',
+            v: '5.199'
+          }
+        });
+        
+        if (vkResponse.data.error) {
+          throw new Error(vkResponse.data.error.error_msg);
+        }
+        
+        const vkPosts = vkResponse.data.response.items;
+        const savedItems = [];
+        
+        for (const post of vkPosts) {
+          if (post.text && !post.markers) { // skip suggested posts
+            const newsItem = new NewsItem({
+              title: post.text.substring(0, 100) + (post.text.length > 100 ? '...' : ''),
+              preview: post.text,
+              category: 'social',
+              status: 'queued',
+              source: source.name,
+              sourceIcon: '🔵',
+              sourceUrl: `https://vk.com/wall${post.owner_id}_${post.id}`,
+              date: new Date(post.date * 1000),
+              tags: ['vk', 'auto-imported']
+            });
+            await newsItem.save();
+            savedItems.push(newsItem);
+          }
+        }
+        
+        source.itemsFound = (source.itemsFound || 0) + savedItems.length;
+        source.lastParsed = new Date().toISOString();
+        await source.save();
+        
+        res.json({ success: true, items: savedItems });
+        
+      } else if (source.type === 'telegram') {
+        // Parse Telegram channel (via web scraping or API)
+        const username = source.url.replace('@', '').replace('https://t.me/', '');
+        
+        // For now, we'll create a placeholder - Telegram parsing requires bot setup
+        res.json({ 
+          success: true, 
+          items: [],
+          message: 'Telegram parsing requires bot token setup. Add bot to channel as admin.'
+        });
+        
       } else {
-        res.status(400).json({ error: 'Only RSS parsing is supported currently' });
+        res.status(400).json({ error: 'Unsupported source type' });
       }
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+      console.error('[News Parse Error]:', e.message);
+      res.status(500).json({ error: e.message }); 
+    }
   });
 
   app.post('/api/news/parse-all', async (req, res) => {

@@ -560,7 +560,7 @@ export default function NewsPage() {
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors"
                             >
                               <Send size={12} />
-                              Отправить
+                              Опубликовать
                             </button>
                             <button
                               onClick={() => handleNewsAction(item.id, 'skip')}
@@ -573,7 +573,7 @@ export default function NewsPage() {
                         )}
                         {item.status === 'sent' && (
                           <span className="text-emerald-600 text-xs font-medium flex items-center gap-1.5">
-                            ✅ Отправлено
+                            ✅ Опубликовано
                           </span>
                         )}
                         {item.status === 'skipped' && (
@@ -582,7 +582,7 @@ export default function NewsPage() {
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors"
                           >
                             <RotateCcw size={12} />
-                            Восстановить
+                            Вернуть в очередь
                           </button>
                         )}
                         {item.sourceUrl && (
