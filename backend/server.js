@@ -743,20 +743,44 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
         // Save items to database
         const savedItems = [];
         for (const item of items) {
-          const newsItem = new NewsItem({
-            title: item.title || 'No title',
-            preview: item.contentSnippet || item.content || '',
-            content: item.content || '',
-            category: 'news',
-            status: 'queued',
-            source: source.name,
-            sourceIcon: '📡',
-            sourceUrl: item.link || source.url,
-            date: item.pubDate || new Date(),
-            tags: ['rss', 'auto-imported']
-          });
-          await newsItem.save();
-          savedItems.push(newsItem);
+          try {
+            const newsItem = new NewsItem({
+              title: item.title || 'No title',
+              preview: item.contentSnippet || item.content || '',
+              content: item.content || '',
+              category: 'news',
+              status: 'queued',
+              source: source.name,
+              sourceIcon: '📡',
+              sourceUrl: item.link || source.url,
+              date: item.pubDate || new Date(),
+              tags: ['rss', 'auto-imported']
+            });
+            await newsItem.save();
+            savedItems.push(newsItem);
+          } catch (saveError) {
+            console.error(`   ⚠️ Не удалось сохранить новость: ${saveError.message}`);
+            // Пробуем ещё раз через 1 секунду
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+              const newsItem = new NewsItem({
+                title: item.title || 'No title',
+                preview: item.contentSnippet || item.content || '',
+                content: item.content || '',
+                category: 'news',
+                status: 'queued',
+                source: source.name,
+                sourceIcon: '📡',
+                sourceUrl: item.link || source.url,
+                date: item.pubDate || new Date(),
+                tags: ['rss', 'auto-imported']
+              });
+              await newsItem.save();
+              savedItems.push(newsItem);
+            } catch (retryError) {
+              console.error(`   ❌ Ошибка после повторной попытки: ${retryError.message}`);
+            }
+          }
         }
         
         source.itemsFound = (source.itemsFound || 0) + items.length;

@@ -236,7 +236,7 @@ export type NewsCategory = 'news' | 'fact' | 'law' | 'social' | 'market';
 export type NewsStatus = 'queued' | 'sent' | 'skipped';
 
 export interface NewsItem {
-  id: number;
+  id: string;
   title: string;
   preview: string;
   content?: string;

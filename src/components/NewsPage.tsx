@@ -196,7 +196,7 @@ export default function NewsPage() {
     }
   };
 
-  const handleDeleteNews = async (id: number) => {
+  const handleDeleteNews = async (id: string) => {
     if (!useBackend || !backendUrl) return;
     const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
 
@@ -209,13 +209,17 @@ export default function NewsPage() {
       if (res.ok) {
         await loadNews();
         toast.success('Новость удалена');
+      } else {
+        const error = await res.json();
+        toast.error(`❌ ${error.error || 'Ошибка удаления'}`);
       }
-    } catch (e) {
-      toast.error('Ошибка удаления');
+    } catch (e: any) {
+      console.error('Delete error:', e);
+      toast.error(`❌ ${e.message || 'Ошибка удаления'}`);
     }
   };
 
-  const handleNewsAction = async (id: number, action: 'send' | 'skip' | 'restore') => {
+  const handleNewsAction = async (id: string, action: 'send' | 'skip' | 'restore') => {
     if (!useBackend || !backendUrl) return;
     const baseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
     const newStatus = action === 'send' ? 'sent' : action === 'skip' ? 'skipped' : 'queued';
