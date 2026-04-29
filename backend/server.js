@@ -746,6 +746,7 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
           const newsItem = new NewsItem({
             title: item.title || 'No title',
             preview: item.contentSnippet || item.content || '',
+            content: item.content || '',
             category: 'news',
             status: 'queued',
             source: source.name,
@@ -761,6 +762,91 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
         source.itemsFound = (source.itemsFound || 0) + items.length;
         source.lastParsed = new Date().toISOString();
         await source.save();
+        
+        // AI обработка новостей
+        if (process.env.GEMINI_API_KEY && savedItems.length > 0) {
+          console.log('🤖 Запуск AI обработки новостей...');
+          try {
+            // Динамический импорт GoogleGenerativeAI
+            const genAIModule = await import('@google/generative-ai');
+            const GoogleGenerativeAI = genAIModule.GoogleGenerativeAI;
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            
+            let processedCount = 0;
+            
+            for (const newsItem of savedItems) {
+              const prompt = `Ты - профессиональный журналист и копирайтер в сфере недвижимости.
+
+Задача: Проверить является ли новость темой недвижимости и если да - обработать её.
+
+ОРИГИНАЛЬНАЯ НОВОСТЬ:
+Заголовок: ${newsItem.title}
+Текст: ${(newsItem.preview || '').substring(0, 1000)}
+
+ИНСТРУКЦИЯ:
+1. Если новость НЕ связана с недвижимостью (война, политика, спорт и т.д.), верни: {"skip": true}
+2. Если новость о недвижимости, создай пост:
+   - ПЕРЕФРАЗИРУЙ своими словами (humanizer)
+   - СОХРАНИ все факты и цифры
+   - СДЕЛАЙ текст живым и интересным
+   - ДОБАВЬ ссылку на первоисточник в конце
+   - ОБЪЁМ: 150-300 слов
+   - ЯЗЫК: русский
+
+ФОРМАТ ОТВЕТА (JSON):
+Если НЕ недвижимость:
+{"skip": true}
+
+Если недвижимость:
+{
+  "skip": false,
+  "title": "Цепляющий заголовок до 80 символов",
+  "content": "Перефразированный пост со ссылкой на источник",
+  "hashtags": ["#недвижимость", "#тег1", "#тег2"]
+}
+
+ВАЖНО:
+- Верни ТОЛЬКО JSON
+- Ссылка на источник обязательна!
+- Не используй markdown!`;
+
+              try {
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const text = response.text();
+                
+                // Парсим JSON
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  const processed = JSON.parse(jsonMatch[0]);
+                  
+                  if (processed.skip) {
+                    // Удаляем новость если не о недвижимости
+                    await NewsItem.findByIdAndDelete(newsItem.id);
+                    console.log(`   ⏭️ Пропущено (не недвижимость): ${newsItem.title.substring(0, 50)}...`);
+                  } else {
+                    // Обновляем с AI обработкой
+                    await NewsItem.findByIdAndUpdate(newsItem.id, {
+                      title: processed.title || newsItem.title,
+                      content: processed.content || newsItem.preview,
+                      preview: (processed.content || newsItem.preview).substring(0, 300),
+                      tags: ['ai-processed', ...(processed.hashtags || ['#недвижимость'])]
+                    });
+                    processedCount++;
+                    console.log(`   ✅ AI обработал: ${processed.title.substring(0, 50)}...`);
+                  }
+                }
+              } catch (itemError) {
+                console.error(`   ⚠️ Ошибка AI для новости: ${itemError.message}`);
+              }
+            }
+            
+            console.log(`✅ AI обработал ${processedCount} новостей о недвижимости`);
+          } catch (aiError) {
+            console.error('AI обработка не удалась:', aiError.message);
+          }
+        }
         
         res.json({ success: true, items: savedItems });
         
@@ -789,6 +875,7 @@ async function rssRule(rule) { try { const feed = await parser.parseURL(rule.sou
             const newsItem = new NewsItem({
               title: post.text.substring(0, 100) + (post.text.length > 100 ? '...' : ''),
               preview: post.text,
+              content: post.text,
               category: 'social',
               status: 'queued',
               source: source.name,
